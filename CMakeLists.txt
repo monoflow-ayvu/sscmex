@@ -1,0 +1,82 @@
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
+project(sscmex_nif C CXX)
+
+# Get directories
+if(NOT DEFINED PRIV_DIR)
+    if(DEFINED MIX_APP_PATH AND NOT "${MIX_APP_PATH}" STREQUAL "")
+        set(PRIV_DIR "${MIX_APP_PATH}/priv")
+    else()
+        set(PRIV_DIR "${CMAKE_CURRENT_SOURCE_DIR}/priv")
+    endif()
+endif()
+
+# Get ERTS include directory
+if(DEFINED ERTS_INCLUDE_DIR AND NOT "${ERTS_INCLUDE_DIR}" STREQUAL "")
+    set(ERTS_INCLUDE_DIR "${ERTS_INCLUDE_DIR}")
+else()
+    find_program(ERL_EXECUTABLE erl)
+    if(ERL_EXECUTABLE)
+        execute_process(
+            COMMAND ${ERL_EXECUTABLE} -noshell -eval "io:format('~s', [code:root_dir() ++ \"/erts-\" ++ erlang:system_info(version) ++ \"/include\"]), halt()."
+            OUTPUT_VARIABLE ERTS_INCLUDE_DIR
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+    else()
+        message(FATAL_ERROR "Erlang executable 'erl' not found")
+    endif()
+endif()
+
+message(STATUS "PRIV_DIR: ${PRIV_DIR}")
+message(STATUS "ERTS_INCLUDE_DIR: ${ERTS_INCLUDE_DIR}")
+
+# Platform-specific linker flags
+if(UNIX AND APPLE)
+    set(CMAKE_SHARED_LINKER_FLAGS "-undefined dynamic_lookup")
+endif()
+
+# C++ standard
+set(CMAKE_CXX_STANDARD 17)
+
+# Include SG200X SDK toolchain if CMAKE_TOOLCHAIN_FILE is set
+if(DEFINED CMAKE_TOOLCHAIN_FILE)
+    message(STATUS "Using CMAKE_TOOLCHAIN_FILE: ${CMAKE_TOOLCHAIN_FILE}")
+endif()
+
+# Include SG200X SDK if SG200X_SDK_PATH is set
+if(DEFINED SG200X_SDK_PATH AND NOT "${SG200X_SDK_PATH}" STREQUAL "")
+    message(STATUS "SG200X_SDK_PATH: ${SG200X_SDK_PATH}")
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/project.cmake)
+endif()
+
+# ERTS includes
+include_directories("${ERTS_INCLUDE_DIR}")
+
+# Source files
+set(SOURCE_FILES
+    "${C_SRC}/sscmex_nif.cpp"
+)
+
+# Build NIF shared library
+add_library(sscmex_nif SHARED ${SOURCE_FILES})
+
+# Install to priv directory
+install(TARGETS sscmex_nif RUNTIME DESTINATION "${PRIV_DIR}")
+
+# Set properties
+set_target_properties(sscmex_nif PROPERTIES PREFIX "")
+if(NOT WIN32)
+    set_target_properties(sscmex_nif PROPERTIES SUFFIX ".so")
+endif()
+
+# RPATH settings
+if(UNIX AND NOT APPLE)
+    set_target_properties(sscmex_nif PROPERTIES
+        INSTALL_RPATH "$ORIGIN/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+elseif(UNIX AND APPLE)
+    set_target_properties(sscmex_nif PROPERTIES
+        INSTALL_RPATH "@loader_path/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
