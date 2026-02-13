@@ -2,6 +2,22 @@
 #include <string>
 #include <cstring>
 
+// TPU Runtime API declarations
+extern "C" {
+    typedef void *CVI_RT_HANDLE;
+    typedef int CVI_RC;
+
+    // Initialize TPU runtime - returns 0 on success
+    CVI_RC CVI_RT_Init(CVI_RT_HANDLE *rt_handle);
+    CVI_RC CVI_RT_DeInit(CVI_RT_HANDLE rt_handle);
+
+    // Memory functions to test allocation
+    typedef void *CVI_RT_MEM;
+    CVI_RT_MEM CVI_RT_MemAlloc(CVI_RT_HANDLE rt_handle, uint64_t size);
+    void CVI_RT_MemFree(CVI_RT_HANDLE rt_handle, CVI_RT_MEM mem);
+    uint64_t CVI_RT_MemGetSize(CVI_RT_MEM mem);
+}
+
 // Helper to make atoms
 static ERL_NIF_TERM make_atom(ErlNifEnv *env, const char *name) {
     return enif_make_atom(env, name);
@@ -23,57 +39,65 @@ static ERL_NIF_TERM hello(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
     return make_ok(env, result);
 }
 
-// Test TPU SDK availability by checking if we can call a simple SDK function
-// We use CVI_NN_GetModelTarget with a null handle to test if the library is properly linked
-// This will fail but won't crash - it just proves the library is linked
-extern "C" {
-    // Forward declaration from cviruntime.h
-    typedef int CVI_RC;
-    CVI_RC CVI_NN_RegisterModel(const char *model_file, void **model);
-}
-
-// Test if TPU SDK is available and properly linked
+// Test TPU by initializing the runtime and allocating memory
 static ERL_NIF_TERM tpu_test(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
-    // Build result map
     ERL_NIF_TERM map = enif_make_new_map(env);
 
-    // Try to call a TPU SDK function to verify it's linked
-    // We intentionally call with NULL to get an error but verify the function exists
-    void *model = nullptr;
-    CVI_RC rc = CVI_NN_RegisterModel(nullptr, &model);
+    CVI_RT_HANDLE handle = nullptr;
+    CVI_RC rc = CVI_RT_Init(&handle);
 
-    // The call will fail with null input, but if we get here, the library is linked
-    // RC values: success=0, error!=0
-    bool sdk_linked = true;  // If we got here, the library is linked
+    if (rc != 0 || handle == nullptr) {
+        enif_make_map_put(env, map, make_atom(env, "success"), make_atom(env, "false"), &map);
+        enif_make_map_put(env, map, make_atom(env, "error"), enif_make_int(env, rc), &map);
+        enif_make_map_put(env, map, make_atom(env, "message"),
+                          enif_make_string(env, "CVI_RT_Init failed", ERL_NIF_LATIN1), &map);
+        return make_error(env, "TPU runtime init failed");
+    }
 
-    enif_make_map_put(env, map,
-                      make_atom(env, "sdk_linked"),
-                      enif_make_atom(env, sdk_linked ? "true" : "false"),
-                      &map);
+    // Try to allocate a small buffer to verify TPU memory works
+    CVI_RT_MEM mem = CVI_RT_MemAlloc(handle, 1024);
+    bool mem_ok = (mem != nullptr);
+    uint64_t mem_size = 0;
+    if (mem_ok) {
+        mem_size = CVI_RT_MemGetSize(mem);
+        CVI_RT_MemFree(handle, mem);
+    }
 
-    enif_make_map_put(env, map,
-                      make_atom(env, "status"),
-                      make_atom(env, "ready"),
-                      &map);
+    // Clean up runtime
+    CVI_RT_DeInit(handle);
 
-    enif_make_map_put(env, map,
-                      make_atom(env, "chip"),
-                      enif_make_string(env, "sg2002", ERL_NIF_LATIN1),
-                      &map);
-
-    enif_make_map_put(env, map,
-                      make_atom(env, "return_code"),
-                      enif_make_int(env, rc),
-                      &map);
+    // Build success result
+    enif_make_map_put(env, map, make_atom(env, "success"), make_atom(env, "true"), &map);
+    enif_make_map_put(env, map, make_atom(env, "runtime_init"), make_atom(env, "ok"), &map);
+    enif_make_map_put(env, map, make_atom(env, "memory_alloc"), mem_ok ? make_atom(env, "ok") : make_atom(env, "failed"), &map);
+    enif_make_map_put(env, map, make_atom(env, "memory_size"), enif_make_int(env, (int)mem_size), &map);
+    enif_make_map_put(env, map, make_atom(env, "chip"), enif_make_string(env, "sg2002", ERL_NIF_LATIN1), &map);
 
     return make_ok(env, map);
 }
 
-// Get TPU SDK version info
+// Get TPU SDK version/runtime info
 static ERL_NIF_TERM tpu_version(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
-    // Return a placeholder version since CVI_RT_GetVersion doesn't exist
-    // The actual SDK version would need to be determined differently
-    return make_ok(env, enif_make_string(env, "TPU SDK linked successfully", ERL_NIF_LATIN1));
+    ERL_NIF_TERM map = enif_make_new_map(env);
+
+    // Initialize runtime to verify it works
+    CVI_RT_HANDLE handle = nullptr;
+    CVI_RC rc = CVI_RT_Init(&handle);
+
+    if (rc == 0 && handle != nullptr) {
+        enif_make_map_put(env, map, make_atom(env, "runtime"), make_atom(env, "available"), &map);
+        enif_make_map_put(env, map, make_atom(env, "status"), make_atom(env, "ok"), &map);
+        CVI_RT_DeInit(handle);
+    } else {
+        enif_make_map_put(env, map, make_atom(env, "runtime"), make_atom(env, "unavailable"), &map);
+        enif_make_map_put(env, map, make_atom(env, "error_code"), enif_make_int(env, rc), &map);
+    }
+
+    // SDK info (these are compile-time constants from the SDK)
+    enif_make_map_put(env, map, make_atom(env, "sdk"), enif_make_string(env, "cvitek_tpu", ERL_NIF_LATIN1), &map);
+    enif_make_map_put(env, map, make_atom(env, "target"), enif_make_string(env, "sg2002/cv181x", ERL_NIF_LATIN1), &map);
+
+    return make_ok(env, map);
 }
 
 // NIF function table
