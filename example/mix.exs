@@ -1,19 +1,24 @@
 defmodule SscmexExample.MixProject do
   use Mix.Project
 
+  @app :sscmex_example
   @version "0.1.0"
   @source_url "https://github.com/fermuch/sscmex"
+  @all_targets [:nerves_system_sg2002]
 
   def project do
     [
-      app: :sscmex_example,
+      app: @app,
       version: @version,
-      elixir: "~> 1.17",
+      elixir: "~> 1.18",
+      archives: [nerves_bootstrap: "~> 1.14"],
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       source_url: @source_url,
       compilers: Mix.compilers(),
-      aliases: [loadconfig: [&bootstrap/1]]
+      aliases: [loadconfig: [&bootstrap/1]],
+      releases: [{@app, release()}],
+      preferred_cli_target: [run: :host, test: :host]
     ]
   end
 
@@ -37,15 +42,23 @@ defmodule SscmexExample.MixProject do
       {:nerves_bootstrap, "~> 1.13", runtime: false},
       {:nerves, "~> 1.10", runtime: false},
       {:nerves_runtime, "~> 0.13"},
-      {:vintage_net, "~> 0.3"},
+      {:nerves_pack, "~> 0.7.1", targets: @all_targets},
       # SG2002 Nerves system - specify as application dependency
       {:nerves_system_sg2002,
        github: "fermuch/nerves_system_sg2002",
        runtime: false,
-       # Tell Nerves which targets this supports
-       app: :sscmex_example,
-       targets: [:nerves_system_sg2002],
-       nerves: [compile: true]}
+       targets: :nerves_system_sg2002,
+       nerves: [compile: true]},
+    ]
+  end
+
+  def release do
+    [
+      overwrite: true,
+      cookie: "#{@app}_cookie",
+      include_erts: &Nerves.Release.erts/0,
+      steps: [&Nerves.Release.init/1, :assemble],
+      strip_beams: Mix.env() == :prod or [keep: ["Docs"]]
     ]
   end
 end
