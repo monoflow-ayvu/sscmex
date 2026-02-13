@@ -43,6 +43,11 @@
     MIX_TARGET = "nerves_system_sg2002";
   };
 
+  languages = {
+    erlang.enable = true;
+    elixir.enable = true;
+  };
+
   # Task to setup SDK before entering shell
   tasks."sg200x:setup-sdk" = {
     exec = ''
