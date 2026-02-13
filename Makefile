@@ -28,6 +28,7 @@ $(SSCMEX_SO): $(PRIV_DIR)
 		-D C_SRC="$(shell pwd)/c_src" \
 		-D MIX_APP_PATH="$(MIX_APP_PATH)" \
 		-D PRIV_DIR="$(PRIV_DIR)" \
+		-D SG200X_SDK_PATH="$(SG200X_SDK_PATH)" \
 		$(CMAKE_CONFIGURE_FLAGS) "$(shell pwd)" && \
 	cmake --build . --config "$(CMAKE_BUILD_TYPE)" -j$(MAKE_JOBS) && \
 	cp "sscmex_nif.so" "$(SSCMEX_SO)"

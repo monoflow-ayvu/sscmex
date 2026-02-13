@@ -59,6 +59,32 @@ set(SOURCE_FILES
 # Build NIF shared library
 add_library(sscmex_nif SHARED ${SOURCE_FILES})
 
+# Link TPU runtime library if SDK is available
+if(DEFINED SG200X_SDK_PATH AND NOT "${SG200X_SDK_PATH}" STREQUAL "")
+    # TPU SDK library path
+    set(TPU_LIB_DIR "${SG200X_SDK_PATH}/install/soc_sg2002_recamera_emmc/tpu_musl_riscv64/cvitek_tpu_sdk/lib")
+
+    # Link against shared TPU libraries
+    target_link_libraries(sscmex_nif PRIVATE
+        cviruntime            # Main TPU runtime (shared)
+        z                     # zlib
+        dl                    # dynamic loading
+        pthread               # threads
+    )
+    message(STATUS "Linking with TPU runtime library (shared): cviruntime")
+
+    # Copy TPU libraries to priv/lib for bundling with the NIF
+    set(PRIV_LIB_DIR "${PRIV_DIR}/lib")
+    add_custom_command(TARGET sscmex_nif POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${PRIV_LIB_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${TPU_LIB_DIR}/libcviruntime.so" "${PRIV_LIB_DIR}/"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${TPU_LIB_DIR}/libcvikernel.so" "${PRIV_LIB_DIR}/"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${TPU_LIB_DIR}/libcvimath.so" "${PRIV_LIB_DIR}/"
+        COMMENT "Copying TPU libraries to priv/lib"
+    )
+    message(STATUS "TPU libraries will be bundled in: ${PRIV_LIB_DIR}")
+endif()
+
 # Install to priv directory
 install(TARGETS sscmex_nif RUNTIME DESTINATION "${PRIV_DIR}")
 
@@ -68,10 +94,10 @@ if(NOT WIN32)
     set_target_properties(sscmex_nif PROPERTIES SUFFIX ".so")
 endif()
 
-# RPATH settings
+# RPATH settings - include /usr/lib where TPU libraries are on target
 if(UNIX AND NOT APPLE)
     set_target_properties(sscmex_nif PROPERTIES
-        INSTALL_RPATH "$ORIGIN/lib"
+        INSTALL_RPATH "$ORIGIN/lib:/usr/lib"
         BUILD_WITH_INSTALL_RPATH TRUE
     )
 elseif(UNIX AND APPLE)

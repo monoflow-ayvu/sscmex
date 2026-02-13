@@ -24,7 +24,19 @@ if(NOT "${SG200X_SDK_PATH}" STREQUAL "")
         link_directories("${SYSROOT}/usr/lib")
     endif()
 
-    # TPU SDK includes and libraries
+    # TPU SDK - the actual path includes install/soc_sg2002_recamera_emmc/
+    set(TPU_SDK_PATH "${SG200X_SDK_PATH}/install/soc_sg2002_recamera_emmc/tpu_musl_riscv64/cvitek_tpu_sdk")
+
+    if(EXISTS "${TPU_SDK_PATH}/include")
+        include_directories(SYSTEM "${TPU_SDK_PATH}/include")
+        message(STATUS "TPU SDK includes: ${TPU_SDK_PATH}/include")
+    endif()
+    if(EXISTS "${TPU_SDK_PATH}/lib")
+        link_directories("${TPU_SDK_PATH}/lib")
+        message(STATUS "TPU SDK libs: ${TPU_SDK_PATH}/lib")
+    endif()
+
+    # Also check old path for backwards compatibility
     if(EXISTS "${SG200X_SDK_PATH}/tpu_musl_riscv64/cvitek_tpu_sdk/include")
         include_directories(SYSTEM "${SG200X_SDK_PATH}/tpu_musl_riscv64/cvitek_tpu_sdk/include")
     endif()

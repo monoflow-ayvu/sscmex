@@ -40,6 +40,9 @@
     squashfsTools
     libmnl
     inotify-tools
+
+    # For patching dynamically linked binaries on NixOS
+    patchelf
   ];
 
   # Environment variables with absolute paths
@@ -106,12 +109,45 @@
     RECAMERA_ROOT="${config.env.DEVENV_ROOT}/.devenv/state/sg200x-sdk"
     export SG200X_SDK_PATH="$RECAMERA_ROOT/sg2002_recamera_emmc"
 
+    COMPILER_ROOT="$RECAMERA_ROOT/host-tools/gcc/riscv64-linux-musl-x86_64"
+    COMPILER_DIR="$COMPILER_ROOT/bin"
+
+    # Patch cross-compiler in-place for NixOS compatibility (only once)
+    if [ -d "$COMPILER_ROOT" ] && [ ! -f "$COMPILER_ROOT/.nixos-patched" ]; then
+      echo "🔧 Patching cross-compiler for NixOS compatibility..."
+
+      # Get the NixOS dynamic linker path
+      NIX_LD=$(cat $NIX_CC/nix-support/dynamic-linker 2>/dev/null || echo "/nix/store/*-glibc-*/lib/ld-linux-x86-64.so.2")
+
+      # If wildcard, resolve it
+      if [[ "$NIX_LD" == *"*"* ]]; then
+        NIX_LD=$(ls /nix/store/*-glibc-*/lib/ld-linux-x86-64.so.2 2>/dev/null | head -1)
+      fi
+
+      if [ -n "$NIX_LD" ] && [ -f "$NIX_LD" ]; then
+        echo "   Using linker: $NIX_LD"
+
+        # Find and patch ALL ELF executables in the entire compiler directory tree
+        find "$COMPILER_ROOT" -type f -executable | while read binary; do
+          if file "$binary" | grep -q "ELF.*executable"; then
+            echo "   Patching: $binary"
+            patchelf --set-interpreter "$NIX_LD" "$binary" 2>/dev/null || true
+          fi
+        done
+
+        # Mark as patched
+        touch "$COMPILER_ROOT/.nixos-patched"
+        echo "✅ Cross-compiler patched successfully!"
+      else
+        echo "⚠️  Could not find NixOS dynamic linker, skipping patching"
+      fi
+    fi
+
     # Add cross-compiler to PATH with absolute path
     # This allows CMake's find_program() to locate the compiler
     # NOTE: We do NOT set CC/CXX environment variables globally because:
     # 1. CMake uses the toolchain file (CMAKE_TOOLCHAIN_FILE) for cross-compilation
     # 2. Other build tools (like Nerves' port Makefile) need to use the host compiler
-    COMPILER_DIR="$RECAMERA_ROOT/host-tools/gcc/riscv64-linux-musl-x86_64/bin"
     export PATH="$COMPILER_DIR:$PATH"
 
     # Create symlinks for toolchain naming convention
