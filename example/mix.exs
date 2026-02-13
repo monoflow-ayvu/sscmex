@@ -41,6 +41,9 @@ defmodule SscmexExample.MixProject do
       {:sscmex, path: ".."},
       {:nerves_bootstrap, "~> 1.13", runtime: false},
       {:nerves, "~> 1.10", runtime: false},
+      {:shoehorn, "~> 0.9.1"},
+      {:ring_logger, "~> 0.11.0"},
+      {:toolshed, "~> 0.4.0"},
       {:nerves_runtime, "~> 0.13"},
       {:nerves_pack, "~> 0.7.1", targets: @all_targets},
       # SG2002 Nerves system - specify as application dependency

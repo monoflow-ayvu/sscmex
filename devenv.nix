@@ -107,6 +107,10 @@
     export SG200X_SDK_PATH="$RECAMERA_ROOT/sg2002_recamera_emmc"
 
     # Add cross-compiler to PATH with absolute path
+    # This allows CMake's find_program() to locate the compiler
+    # NOTE: We do NOT set CC/CXX environment variables globally because:
+    # 1. CMake uses the toolchain file (CMAKE_TOOLCHAIN_FILE) for cross-compilation
+    # 2. Other build tools (like Nerves' port Makefile) need to use the host compiler
     COMPILER_DIR="$RECAMERA_ROOT/host-tools/gcc/riscv64-linux-musl-x86_64/bin"
     export PATH="$COMPILER_DIR:$PATH"
 
@@ -120,12 +124,6 @@
       done
     fi
 
-    # Set explicit compiler environment variables with absolute paths
-    export CC="$COMPILER_DIR/riscv64-unknown-linux-musl-gcc"
-    export CXX="$COMPILER_DIR/riscv64-unknown-linux-musl-g++"
-    export AR="$COMPILER_DIR/riscv64-unknown-linux-musl-ar"
-    export STRIP="$COMPILER_DIR/riscv64-unknown-linux-musl-strip"
-
     # Enable shell history for erlang/elixir
     export ERL_AFLAGS="-kernel shell_history enabled"
 
@@ -138,6 +136,9 @@
     echo "🔧 Toolchain File: ${config.env.CMAKE_TOOLCHAIN_FILE}"
     echo "🔧 Compiler Dir: $COMPILER_DIR"
     echo "🎯 Nerves Target: $MIX_TARGET"
+    echo ""
+    echo "ℹ️  Cross-compilation is configured via CMAKE_TOOLCHAIN_FILE"
+    echo "   Use: cmake -DCMAKE_TOOLCHAIN_FILE=\$CMAKE_TOOLCHAIN_FILE ."
     echo ""
   '';
 

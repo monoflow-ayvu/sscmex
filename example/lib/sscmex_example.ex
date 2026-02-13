@@ -23,7 +23,7 @@ defmodule SscmexExample do
         Logger.error("Failed to load SSCMEx NIF: #{inspect(reason)}")
     end
 
-    {:ok, self}
+    {:ok, self()}
   end
 
   defp test_nif do
@@ -33,4 +33,5 @@ defmodule SscmexExample do
       {:error, reason} ->
         Logger.error("NIF test failed: #{inspect(reason)}")
     end
+  end
 end
