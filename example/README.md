@@ -1,112 +1,33 @@
-# Sscmex Example - Nerves Application for Testing SSCMEx
+# Example
 
-This is a minimal Nerves application to test the SSCMEx NIF on real SG2002 hardware using the [nerves_system_sg2002](https://github.com/fermuch/nerves_system_sg2002) system.
+**TODO: Add description**
 
-## Prerequisites
+## Targets
 
-1. Nerves installed and configured
-2. SG2002 board (reCamera) with SSH access configured
-3. nerves_system_sg2002 system available
+Nerves applications produce images for hardware targets based on the
+`MIX_TARGET` environment variable. If `MIX_TARGET` is unset, `mix` builds an
+image that runs on the host (e.g., your laptop). This is useful for executing
+logic tests, running utilities, and debugging. Other targets are represented by
+a short name like `rpi3` that maps to a Nerves system image for that platform.
+All of this logic is in the generated `mix.exs` and may be customized. For more
+information about targets see:
 
-## WiFi Configuration
+https://hexdocs.pm/nerves/supported-targets.html
 
-Before building, configure your WiFi credentials:
+## Getting Started
 
-```bash
-# Copy the secrets template
-cp config/secrets.exs.example config/secrets.exs
+To start your Nerves app:
+  * `export MIX_TARGET=my_target` or prefix every command with
+    `MIX_TARGET=my_target`. For example, `MIX_TARGET=rpi3`
+  * Install dependencies with `mix deps.get`
+  * Create firmware with `mix firmware`
+  * Burn to an SD card with `mix burn`
 
-# Edit with your WiFi credentials
-# Change ssid and psk to your actual values
-nano config/secrets.exs
-```
+## Learn more
 
-**Note:** `config/secrets.exs` is in `.gitignore` and will not be committed.
-
-## Building the Firmware
-
-```bash
-cd example
-mix deps.get
-mix firmware
-```
-
-## Deploying to Board
-
-```bash
-# Upload firmware to board (replace with your board's IP)
-mix upload --board <board-ip>
-
-# Or if using SSH alias
-mix upload --board nerves.local
-```
-
-## Testing the NIF
-
-Once deployed, you can test the NIF by connecting to the board:
-
-```bash
-# SSH into the board
-ssh nerves.local
-
-# Or run IEx remotely
-iex --remsh nerves.local --cookie nerves
-
-# Test the NIF
-iex> Sscmex.hello()
-{:ok, "Hello from SSCMEx NIF!"}
-```
-
-You should see logs showing:
-```
-Starting Sscmex Example Application...
-SSCMEx NIF loaded successfully!
-NIF test passed: Hello from SSCMEx NIF!
-```
-
-## What This Tests
-
-1. **NIF Loading**: Verifies that the NIF shared library can be loaded on the SG2002
-2. **NIF Function Call**: Calls the `hello/0` NIF function and verifies it returns the expected result
-3. **Logging**: All operations are logged to the console for debugging
-
-## Next Steps
-
-Once this example works on real hardware:
-
-1. Add TPU SDK initialization code
-2. Add camera frame capture from V4L2
-3. Add TPU inference calls for object detection
-4. Add Nx tensor conversion for binary data handling
-5. Add camera preview/testing functions
-
-## Troubleshooting
-
-### NIF fails to load
-
-Check that the NIF was compiled for the correct architecture (RISCV):
-
-```bash
-file _build/dev/lib/sscmex/priv/sscmex_nif.so
-# Should show: ELF 64-bit LSB shared object, UCB RISC-V, ...
-```
-
-### Connection issues
-
-```bash
-# Check board is accessible
-ping nerves.local
-
-# Verify SSH keys
-ssh nerves.local
-```
-
-### Logs
-
-```bash
-# View full logs on the board
-ssh nerves.local "journalctl -f -u sscmex_example.service"
-
-# Or view ring buffer
-dmesg | grep -i sscmex
-```
+  * Official docs: https://hexdocs.pm/nerves/getting-started.html
+  * Official website: https://nerves-project.org/
+  * Forum: https://elixirforum.com/c/nerves-forum
+  * Elixir Slack #nerves channel: https://elixir-slack.community/
+  * Elixir Discord #nerves channel: https://discord.gg/elixir
+  * Source: https://github.com/nerves-project/nerves

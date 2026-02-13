@@ -13,42 +13,8 @@
 # If the VM crashes, it generates a dump, let's ignore it too.
 erl_crash.dump
 
-# Also ignore archive artifacts (built via "mix archive.build").
-*.ez
-
-# Ignore package tarball (built via "mix hex.build").
-sscmex-*.tar
-
 # Temporary files, for example, from tests.
 /tmp/
 
 
-build/
-.nix-*
-compile_commands.json
-
-
-# Devenv
-.devenv*
-devenv.local.nix
-devenv.local.yaml
-
-# direnv
-.direnv
-
-# pre-commit
-.pre-commit-config.yaml
-
-
-# ccls related
-.ccls-cache
-.cache
-
-# Secrets - DO NOT COMMIT
-**/secrets.exs
-config/secrets.exs
-example/config/secrets.exs
-example/deps
-
-firmware.img
-_build
+example.img
