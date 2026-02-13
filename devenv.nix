@@ -32,6 +32,14 @@
 
     # Elixir development
     inotify-tools
+
+    # Used by the example
+    autoconf
+    automake
+    fwup
+    squashfsTools
+    libmnl
+    inotify-tools
   ];
 
   # Environment variables with absolute paths
@@ -44,8 +52,14 @@
   };
 
   languages = {
-    erlang.enable = true;
-    elixir.enable = true;
+    elixir = {
+      enable = true;
+      package = pkgs.beam28Packages.elixir_1_18;
+    };
+    erlang = {
+      enable = true;
+      package = pkgs.beam28Packages.erlang;
+    };
   };
 
   # Task to setup SDK before entering shell
@@ -137,7 +151,7 @@
   devcontainer.enable = true;
 
   # Publish libraries to environment
-  env.LIBRARY_PATH = pkgs.lib.makeLibraryPath (with pkgs; [ zlib ncurses glibc ]);
-  env.LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (with pkgs; [ zlib ncurses glibc ]);
-  env.PKG_CONFIG_PATH = pkgs.lib.makeSearchPath "lib/pkgconfig" (with pkgs; [ zlib ncurses glibc ]);
+  env.LIBRARY_PATH = pkgs.lib.makeLibraryPath (with pkgs; [ zlib ncurses glibc libmnl ]);
+  env.LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (with pkgs; [ zlib ncurses glibc libmnl ]);
+  env.PKG_CONFIG_PATH = pkgs.lib.makeSearchPath "lib/pkgconfig" (with pkgs; [ zlib ncurses glibc libmnl ]);
 }
