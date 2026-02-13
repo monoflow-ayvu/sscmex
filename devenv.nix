@@ -39,6 +39,8 @@
     SG200X_FHS = "1";
     CMAKE_TOOLCHAIN_FILE = "${config.env.DEVENV_ROOT}/cmake/toolchain-riscv64-linux-musl-x86_64.cmake";
     SG200X_SDK_PATH = "${config.env.DEVENV_ROOT}/.devenv/state/sg200x-sdk/sg2002_recamera_emmc";
+    # Default Nerves target for the example project
+    MIX_TARGET = "nerves_system_sg2002";
   };
 
   # Task to setup SDK before entering shell
@@ -116,6 +118,7 @@
     echo "📁 SDK Path: $SG200X_SDK_PATH"
     echo "🔧 Toolchain File: ${config.env.CMAKE_TOOLCHAIN_FILE}"
     echo "🔧 Compiler Dir: $COMPILER_DIR"
+    echo "🎯 Nerves Target: $MIX_TARGET"
     echo ""
   '';
 
@@ -128,7 +131,7 @@
   # Enable devcontainer to generate a devcontainer.json file
   devcontainer.enable = true;
 
-  # Publish libraries to the environment
+  # Publish libraries to environment
   env.LIBRARY_PATH = pkgs.lib.makeLibraryPath (with pkgs; [ zlib ncurses glibc ]);
   env.LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (with pkgs; [ zlib ncurses glibc ]);
   env.PKG_CONFIG_PATH = pkgs.lib.makeSearchPath "lib/pkgconfig" (with pkgs; [ zlib ncurses glibc ]);

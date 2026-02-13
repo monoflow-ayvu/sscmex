@@ -49,3 +49,6 @@ devenv.local.yaml
 config/secrets.exs
 example/config/secrets.exs
 example/deps
+
+firmware.img
+_build
