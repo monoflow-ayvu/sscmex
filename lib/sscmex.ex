@@ -1,9 +1,11 @@
 defmodule SSCMEx do
   @moduledoc """
-  SSCMA NIF bindings for SG2002 chip.
+  SSCMA NIF bindings for SG2002 chip (reCamera).
 
   Provides high-level Elixir interface to SSCMA (Smart Sensor and Control Module for AI)
-  running on the reCamera SG2002 chip.
+  using SSCMA-Micro as the backend for TPU operations.
+
+  The NIF is automatically loaded when the module is first used.
   """
 
   @doc """
@@ -17,11 +19,29 @@ defmodule SSCMEx do
   defdelegate hello, to: SSCMEx.Nif
 
   @doc """
-  Loads the NIF library. Called automatically on application start.
+  Loads the NIF library.
+
+  This is called automatically via `@on_load` when the module is first referenced.
+  You only need to call this manually if you want to reload the NIF.
 
   Returns `:ok` on success, `{:error, reason}` on failure.
   """
   defdelegate load_nif, to: SSCMEx.Nif
+
+  @doc """
+  Initializes the TPU via SSCMA-Micro.
+
+  This function creates an EngineCVI instance and initializes it to verify
+  the SSCMA-Micro library is properly integrated.
+
+  Returns `{:ok, info}` on success, `{:error, reason}` on failure.
+
+  ## Examples
+
+      iex> SSCMEx.sscma_init()
+      {:ok, %{success: true, engine: :cvi, library: :sscma_micro, status: :ok, sscma_version: "2.0.0", chip: :sg2002}}
+  """
+  defdelegate sscma_init, to: SSCMEx.Nif
 
   @doc """
   Checks if the NIF is loaded and functional.
@@ -37,27 +57,4 @@ defmodule SSCMEx do
       _ -> false
     end
   end
-
-  @doc """
-  Tests the TPU by initializing the runtime and getting device info.
-
-  Returns `{:ok, info}` with TPU information on success,
-  `{:error, reason}` on failure.
-
-  ## Examples
-
-      iex> SSCMEx.tpu_test()
-      {:ok, %{chip: "cv181x", version: "1.0.0", status: :ready}}
-  """
-  defdelegate tpu_test, to: SSCMEx.Nif
-
-  @doc """
-  Gets the TPU SDK version.
-
-  ## Examples
-
-      iex> SSCMEx.tpu_version()
-      {:ok, "1.0.0"}
-  """
-  defdelegate tpu_version, to: SSCMEx.Nif
 end

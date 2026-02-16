@@ -48,12 +48,16 @@ if(DEFINED SG200X_SDK_PATH AND NOT "${SG200X_SDK_PATH}" STREQUAL "")
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/project.cmake)
 endif()
 
+# Include SSCMA-Micro configuration
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/sscma_micro.cmake)
+
 # ERTS includes
 include_directories("${ERTS_INCLUDE_DIR}")
 
 # Source files
 set(SOURCE_FILES
     "${C_SRC}/sscmex_nif.cpp"
+    "${C_SRC}/sscma_porting.cpp"
 )
 
 # Build NIF shared library
@@ -64,8 +68,9 @@ if(DEFINED SG200X_SDK_PATH AND NOT "${SG200X_SDK_PATH}" STREQUAL "")
     # TPU SDK library path
     set(TPU_LIB_DIR "${SG200X_SDK_PATH}/install/soc_sg2002_recamera_emmc/tpu_musl_riscv64/cvitek_tpu_sdk/lib")
 
-    # Link against shared TPU libraries
+    # Link against shared TPU libraries and SSCMA-Micro
     target_link_libraries(sscmex_nif PRIVATE
+        sscma_micro           # SSCMA-Micro library
         cviruntime            # Main TPU runtime (shared)
         z                     # zlib
         dl                    # dynamic loading
