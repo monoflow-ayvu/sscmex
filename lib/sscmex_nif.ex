@@ -1,6 +1,5 @@
 defmodule SSCMEx.Nif do
   @moduledoc false
-
   @on_load :load_nif
 
   def load_nif do
@@ -8,13 +7,20 @@ defmodule SSCMEx.Nif do
     :erlang.load_nif(path, 0)
   end
 
-  defdelegate hello, to: SSCMEx.Nif.Loader
-  defdelegate sscma_init, to: SSCMEx.Nif.Loader
+  # EngineCVI resource functions
+  defdelegate engine_cvi_new, to: SSCMEx.Nif.Loader
+  defdelegate engine_cvi_init(resource), to: SSCMEx.Nif.Loader
+  defdelegate engine_cvi_load(resource, path), to: SSCMEx.Nif.Loader
+  defdelegate engine_cvi_get_input_size(resource), to: SSCMEx.Nif.Loader
+  defdelegate engine_cvi_get_output_size(resource), to: SSCMEx.Nif.Loader
 end
 
 defmodule SSCMEx.Nif.Loader do
   @moduledoc false
 
-  def hello, do: :erlang.nif_error(:undefined_function)
-  def sscma_init, do: :erlang.nif_error(:undefined_function)
+  def engine_cvi_new, do: :erlang.nif_error(:undefined_function)
+  def engine_cvi_init(_resource), do: :erlang.nif_error(:undefined_function)
+  def engine_cvi_load(_resource, _path), do: :erlang.nif_error(:undefined_function)
+  def engine_cvi_get_input_size(_resource), do: :erlang.nif_error(:undefined_function)
+  def engine_cvi_get_output_size(_resource), do: :erlang.nif_error(:undefined_function)
 end

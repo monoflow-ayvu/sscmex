@@ -14,7 +14,7 @@ inline std::string get_string(ErlNifEnv *env, ERL_NIF_TERM term) {
     }
     std::string result(len, '\0');
     char *buf = &result[0];
-    if (!enif_get_string(env, term, buf, len + 1)) {
+    if (!enif_get_string(env, term, buf, len + 1, ERL_NIF_LATIN1)) {
         return "";
     }
     return result;
@@ -22,12 +22,12 @@ inline std::string get_string(ErlNifEnv *env, ERL_NIF_TERM term) {
 
 // Create binary term
 inline ERL_NIF_TERM make_binary(ErlNifEnv *env, const std::string &str) {
-    return enif_make_string_len(env, str.c_str(), str.size());
+    return enif_make_string_len(env, str.c_str(), str.size(), ERL_NIF_LATIN1);
 }
 
 // Create binary term from char*
 inline ERL_NIF_TERM make_binary(ErlNifEnv *env, const char *str, size_t len) {
-    return enif_make_string_len(env, str, len);
+    return enif_make_string_len(env, str, len, ERL_NIF_LATIN1);
 }
 
 // Make :ok atom
@@ -51,5 +51,27 @@ inline ERL_NIF_TERM error(ErlNifEnv *env, ERL_NIF_TERM reason) {
 }
 
 } // namespace erlang::nif
+
+// Template for type-safe NIF resources
+template<typename T>
+struct NifRes {
+    static ErlNifResourceType* type;
+
+    T* val;  // The actual C++ object
+
+    static NifRes<T>* allocate(ErlNifEnv* env) {
+        void* ptr = enif_alloc_resource(type, sizeof(NifRes<T>));
+        if (!ptr) return nullptr;
+        NifRes<T>* res = new (ptr) NifRes<T>();
+        res->val = nullptr;
+        return res;
+    }
+
+    static NifRes<T>* get(ErlNifEnv* env, ERL_NIF_TERM term) {
+        NifRes<T>* res = nullptr;
+        enif_get_resource(env, term, type, (void**)&res);
+        return res;
+    }
+};
 
 #endif // NIF_UTILS_HPP
