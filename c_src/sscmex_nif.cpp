@@ -7,8 +7,21 @@
 
 using namespace ma::engine;
 
+// Forward declaration
+struct TensorDataRes;
+
 // Instantiate template for EngineCVI
 template<> ErlNifResourceType* NifRes<EngineCVI>::type = nullptr;
+
+// Tensor data resource for zero-copy binary transfer
+struct TensorDataRes {
+    NifRes<EngineCVI>* engine_res;  // Reference to engine (keeps it alive)
+    uint8_t* data;                   // Pointer to tensor data
+    size_t size;                     // Size in bytes
+};
+
+// Instantiate template for TensorDataRes
+template<> ErlNifResourceType* NifRes<TensorDataRes>::type = nullptr;
 
 // Helper to make atoms
 static ERL_NIF_TERM make_atom(ErlNifEnv *env, const char *name) {
@@ -87,6 +100,20 @@ static ERL_NIF_TERM quant_param_to_map(ErlNifEnv* env, const ma_quant_param_t& q
 static void engine_cvi_dtor(ErlNifEnv* env, void* obj) {
     auto* res = static_cast<NifRes<EngineCVI>*>(obj);
     if (res->val) {
+        delete res->val;
+        res->val = nullptr;
+    }
+}
+
+// Tensor data resource destructor - releases engine reference
+static void tensor_data_dtor(ErlNifEnv* env, void* obj) {
+    auto* res = static_cast<NifRes<TensorDataRes>*>(obj);
+    if (res->val) {
+        if (res->val->engine_res) {
+            // Release our reference to the engine
+            enif_release_resource(res->val->engine_res);
+            res->val->engine_res = nullptr;
+        }
         delete res->val;
         res->val = nullptr;
     }
@@ -176,22 +203,35 @@ static ERL_NIF_TERM engine_cvi_get_input(ErlNifEnv* env, int argc, const ERL_NIF
     return make_ok(env, map);
 }
 
-// NIF: Get output tensor (returns map with binary data)
+// NIF: Get output tensor (returns map with binary data - ZERO COPY)
 static ERL_NIF_TERM engine_cvi_get_output(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    auto* res = NifRes<EngineCVI>::get(env, argv[0]);
-    if (!res || !res->val) return make_error(env, "invalid_resource");
+    auto* engine_res = NifRes<EngineCVI>::get(env, argv[0]);
+    if (!engine_res || !engine_res->val) return make_error(env, "invalid_resource");
 
     int32_t index;
     if (!enif_get_int(env, argv[1], &index)) return make_error(env, "invalid_index");
 
-    ma_tensor_t tensor = res->val->getOutput(index);
+    ma_tensor_t tensor = engine_res->val->getOutput(index);
 
-    // Create binary from tensor data
-    ErlNifBinary bin;
-    if (!enif_alloc_binary(tensor.size, &bin)) {
-        return make_error(env, "binary_allocation_failed");
-    }
-    memcpy(bin.data, tensor.data.u8, tensor.size);
+    // Allocate tensor data resource for zero-copy
+    auto* tensor_res = NifRes<TensorDataRes>::allocate(env);
+    if (!tensor_res) return make_error(env, "allocation_failed");
+
+    tensor_res->val = new TensorDataRes();
+    tensor_res->val->engine_res = engine_res;
+    tensor_res->val->data = tensor.data.u8;
+    tensor_res->val->size = tensor.size;
+
+    // Keep engine alive while tensor data is in use
+    enif_keep_resource(engine_res);
+
+    // Create zero-copy binary backed by resource
+    ERL_NIF_TERM data_bin = enif_make_resource_binary(
+        env,
+        tensor_res,
+        tensor.data.u8,
+        tensor.size
+    );
 
     // Build result map
     ERL_NIF_TERM map = enif_make_new_map(env);
@@ -199,11 +239,14 @@ static ERL_NIF_TERM engine_cvi_get_output(ErlNifEnv* env, int argc, const ERL_NI
     enif_make_map_put(env, map, make_atom(env, "type"), tensor_type_to_atom(env, tensor.type), &map);
     enif_make_map_put(env, map, make_atom(env, "size"), enif_make_uint64(env, tensor.size), &map);
     enif_make_map_put(env, map, make_atom(env, "quant_param"), quant_param_to_map(env, tensor.quant_param), &map);
-    enif_make_map_put(env, map, make_atom(env, "data"), enif_make_binary(env, &bin), &map);
+    enif_make_map_put(env, map, make_atom(env, "data"), data_bin, &map);
     enif_make_map_put(env, map, make_atom(env, "name"),
         enif_make_string(env, tensor.name ? tensor.name : "", ERL_NIF_LATIN1), &map);
     enif_make_map_put(env, map, make_atom(env, "is_physical"),
         tensor.is_physical ? make_atom(env, "true") : make_atom(env, "false"), &map);
+
+    // Release our reference - binary keeps it alive via resource
+    enif_release_resource(tensor_res);
 
     return make_ok(env, map);
 }
@@ -342,11 +385,19 @@ static int on_load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info) {
     ErlNifResourceFlags flags = (ErlNifResourceFlags)(
         ERL_NIF_RT_CREATE | ERL_NIF_RT_TAKEOVER);
 
+    // Register engine resource type
     NifRes<EngineCVI>::type = enif_open_resource_type(
         env, "Elixir.SSCMEx.Nif", "engine_cvi",
         engine_cvi_dtor, flags, NULL);
 
-    return NifRes<EngineCVI>::type ? 0 : -1;
+    if (!NifRes<EngineCVI>::type) return -1;
+
+    // Register tensor data resource type for zero-copy
+    NifRes<TensorDataRes>::type = enif_open_resource_type(
+        env, "Elixir.SSCMEx.Nif", "tensor_data",
+        tensor_data_dtor, flags, NULL);
+
+    return NifRes<TensorDataRes>::type ? 0 : -1;
 }
 
 // NIF reload
