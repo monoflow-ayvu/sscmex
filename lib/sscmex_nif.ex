@@ -1,6 +1,6 @@
 defmodule SSCMEx.Nif do
   @moduledoc false
-  @on_load :load_nif
+  # @on_load :load_nif
 
   require Logger
 

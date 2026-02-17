@@ -59,10 +59,14 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/sscma_micro.cmake)
 # ERTS includes
 include_directories("${ERTS_INCLUDE_DIR}")
 
+# Include c_src directory for ma_config_board.h and other porting headers
+include_directories("${C_SRC}")
+
 # Source files
 set(SOURCE_FILES
     "${C_SRC}/sscmex_nif.cpp"
     "${C_SRC}/sscma_porting.cpp"
+    "${C_SRC}/ma_device.cpp"
 )
 
 # Build NIF shared library
