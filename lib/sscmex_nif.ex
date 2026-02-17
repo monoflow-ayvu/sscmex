@@ -1,6 +1,6 @@
 defmodule SSCMEx.Nif do
   @moduledoc false
-  # @on_load :load_nif
+  @on_load :load_nif
 
   require Logger
 
@@ -52,4 +52,10 @@ defmodule SSCMEx.Nif do
   def model_run(_model_resource, _image_struct), do: :erlang.nif_error(:nif_not_loaded)
   def model_set_config(_model_resource, _option, _value), do: :erlang.nif_error(:nif_not_loaded)
   def model_get_perf(_model_resource), do: :erlang.nif_error(:nif_not_loaded)
+
+  # Device resource functions
+  def device_get_instance, do: :erlang.nif_error(:nif_not_loaded)
+  def device_get_info(_device_resource), do: :erlang.nif_error(:nif_not_loaded)
+  def device_get_sensors(_device_resource), do: :erlang.nif_error(:nif_not_loaded)
+  def device_get_models(_device_resource), do: :erlang.nif_error(:nif_not_loaded)
 end

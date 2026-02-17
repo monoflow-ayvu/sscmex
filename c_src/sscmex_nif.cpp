@@ -8,6 +8,7 @@
 #include "sscma/core/engine/ma_engine_cvi.h"
 #include "sscma/core/model/ma_model_factory.h"
 #include "sscma/core/model/ma_model_detector.h"
+#include "sscma/porting/ma_device.h"
 
 using namespace ma::engine;
 using namespace ma::model;
@@ -16,6 +17,7 @@ using namespace ma;
 // Forward declarations
 struct TensorDataRes;
 struct ModelRes;
+struct DeviceRes;
 
 // Instantiate template for EngineCVI
 template<> ErlNifResourceType* NifRes<EngineCVI>::type = nullptr;
@@ -38,6 +40,14 @@ struct ModelRes {
 
 // Instantiate template for ModelRes
 template<> ErlNifResourceType* NifRes<ModelRes>::type = nullptr;
+
+// Device resource - wraps ma::Device singleton
+struct DeviceRes {
+    Device* device;  // Pointer to Device singleton
+};
+
+// Instantiate template for DeviceRes
+template<> ErlNifResourceType* NifRes<DeviceRes>::type = nullptr;
 
 // Helper to make atoms
 static ERL_NIF_TERM make_atom(ErlNifEnv *env, const char *name) {
@@ -147,6 +157,17 @@ static void model_dtor(ErlNifEnv* env, void* obj) {
             enif_release_resource(res->val->engine_res);
             res->val->engine_res = nullptr;
         }
+        delete res->val;
+        res->val = nullptr;
+    }
+}
+
+// Device resource destructor - Device is a singleton, no explicit cleanup needed
+static void device_dtor(ErlNifEnv* env, void* obj) {
+    auto* res = static_cast<NifRes<DeviceRes>*>(obj);
+    if (res->val) {
+        // Device is a singleton managed by the system, don't delete it
+        res->val->device = nullptr;
         delete res->val;
         res->val = nullptr;
     }
@@ -659,6 +680,107 @@ static ERL_NIF_TERM model_get_perf(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
     return make_ok(env, perf_to_map(env, perf));
 }
 
+// ============================================================================
+// Device NIF Functions
+// ============================================================================
+
+// NIF: Get Device singleton instance
+static ERL_NIF_TERM device_get_instance(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    auto* res = NifRes<DeviceRes>::allocate(env);
+    if (!res) return make_error(env, "allocation_failed");
+
+    res->val = new DeviceRes();
+    res->val->device = Device::getInstance();
+
+    if (!res->val->device) {
+        delete res->val;
+        res->val = nullptr;
+        return make_error(env, "device_not_available");
+    }
+
+    ERL_NIF_TERM term = enif_make_resource(env, res);
+    enif_release_resource(res);
+    return make_ok(env, term);
+}
+
+// NIF: Get device info (name, id, version, boot_count)
+static ERL_NIF_TERM device_get_info(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    auto* res = NifRes<DeviceRes>::get(env, argv[0]);
+    if (!res || !res->val || !res->val->device) return make_error(env, "invalid_resource");
+
+    Device* device = res->val->device;
+    ERL_NIF_TERM map = enif_make_new_map(env);
+
+    enif_make_map_put(env, map, make_atom(env, "name"),
+        enif_make_string(env, device->name().c_str(), ERL_NIF_LATIN1), &map);
+    enif_make_map_put(env, map, make_atom(env, "id"),
+        enif_make_string(env, device->id().c_str(), ERL_NIF_LATIN1), &map);
+    enif_make_map_put(env, map, make_atom(env, "version"),
+        enif_make_string(env, device->version().c_str(), ERL_NIF_LATIN1), &map);
+    enif_make_map_put(env, map, make_atom(env, "boot_count"),
+        enif_make_uint64(env, device->bootCount()), &map);
+
+    return make_ok(env, map);
+}
+
+// Helper: sensor type to atom
+static ERL_NIF_TERM sensor_type_to_atom(ErlNifEnv* env, Sensor::Type type) {
+    switch (type) {
+        case Sensor::Type::kCamera:     return make_atom(env, "camera");
+        case Sensor::Type::kMicrophone: return make_atom(env, "microphone");
+        case Sensor::Type::kIMU:        return make_atom(env, "imu");
+        default:                        return make_atom(env, "unknown");
+    }
+}
+
+// NIF: Get sensors list
+static ERL_NIF_TERM device_get_sensors(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    auto* res = NifRes<DeviceRes>::get(env, argv[0]);
+    if (!res || !res->val || !res->val->device) return make_error(env, "invalid_resource");
+
+    const std::vector<Sensor*>& sensors = res->val->device->getSensors();
+
+    std::vector<ERL_NIF_TERM> sensor_terms;
+    for (Sensor* sensor : sensors) {
+        ERL_NIF_TERM sensor_map = enif_make_new_map(env);
+        enif_make_map_put(env, sensor_map, make_atom(env, "id"),
+            enif_make_uint64(env, sensor->getID()), &sensor_map);
+        enif_make_map_put(env, sensor_map, make_atom(env, "type"),
+            sensor_type_to_atom(env, sensor->getType()), &sensor_map);
+        sensor_terms.push_back(sensor_map);
+    }
+
+    ERL_NIF_TERM list = enif_make_list_from_array(env, sensor_terms.data(), sensor_terms.size());
+    return make_ok(env, list);
+}
+
+// NIF: Get models list (model metadata, not loaded models)
+static ERL_NIF_TERM device_get_models(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    auto* res = NifRes<DeviceRes>::get(env, argv[0]);
+    if (!res || !res->val || !res->val->device) return make_error(env, "invalid_resource");
+
+    const std::vector<ma_model_t>& models = res->val->device->getModels();
+
+    std::vector<ERL_NIF_TERM> model_terms;
+    for (const ma_model_t& model : models) {
+        ERL_NIF_TERM model_map = enif_make_new_map(env);
+        enif_make_map_put(env, model_map, make_atom(env, "id"),
+            enif_make_int(env, model.id), &model_map);
+        enif_make_map_put(env, model_map, make_atom(env, "name"),
+            enif_make_string(env, model.name ? (const char*)model.name : "", ERL_NIF_LATIN1), &model_map);
+        enif_make_map_put(env, model_map, make_atom(env, "type"),
+            model_type_to_atom(env, model.type), &model_map);
+        enif_make_map_put(env, model_map, make_atom(env, "size"),
+            enif_make_uint64(env, model.size), &model_map);
+        enif_make_map_put(env, model_map, make_atom(env, "addr"),
+            enif_make_uint64(env, (uint64_t)model.addr), &model_map);
+        model_terms.push_back(model_map);
+    }
+
+    ERL_NIF_TERM list = enif_make_list_from_array(env, model_terms.data(), model_terms.size());
+    return make_ok(env, list);
+}
+
 // NIF function table
 static ErlNifFunc nif_functions[] = {
     // Engine functions
@@ -688,6 +810,12 @@ static ErlNifFunc nif_functions[] = {
     {"model_run", 2, model_run, ERL_NIF_DIRTY_JOB_CPU_BOUND},
     {"model_set_config", 3, model_set_config, 0},
     {"model_get_perf", 1, model_get_perf, 0},
+
+    // Device functions
+    {"device_get_instance", 0, device_get_instance, 0},
+    {"device_get_info", 1, device_get_info, 0},
+    {"device_get_sensors", 1, device_get_sensors, 0},
+    {"device_get_models", 1, device_get_models, 0},
 };
 
 // NIF initialization - register resource type
@@ -714,7 +842,14 @@ static int on_load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info) {
         env, "Elixir.SSCMEx.Nif", "model",
         model_dtor, flags, NULL);
 
-    return NifRes<ModelRes>::type ? 0 : -1;
+    if (!NifRes<ModelRes>::type) return -1;
+
+    // Register device resource type
+    NifRes<DeviceRes>::type = enif_open_resource_type(
+        env, "Elixir.SSCMEx.Nif", "device",
+        device_dtor, flags, NULL);
+
+    return NifRes<DeviceRes>::type ? 0 : -1;
 }
 
 // NIF reload
