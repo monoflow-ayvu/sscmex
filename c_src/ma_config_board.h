@@ -10,6 +10,9 @@
 // Board identification
 #define MA_BOARD_NAME "reCamera_SG2002"
 
+// Use pthread OSAL for Linux-based systems
+#define MA_OSAL_PTHREAD 1
+
 // Use CVI (CVitek) inference engine for TPU
 // Note: SSCMA-Micro uses #ifdef checks, so we define this macro (value doesn't matter)
 #define MA_USE_ENGINE_CVI 1

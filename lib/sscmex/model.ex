@@ -69,6 +69,8 @@ defmodule SSCMEx.Model do
   Create a new model from an engine.
 
   The model is automatically created based on the loaded model type.
+  You must load a model with `SSCMEx.Engine.load/2` before calling this;
+  otherwise you get `{:error, ~c"no_model_loaded"}`.
 
   ## Parameters
 
@@ -78,6 +80,8 @@ defmodule SSCMEx.Model do
 
   ## Examples
 
+      {:ok, engine} = SSCMEx.Engine.new()
+      :ok = SSCMEx.Engine.load(engine, "/path/to/model.cvimodel")
       {:ok, model} = SSCMEx.Model.create(engine)
       {:ok, model} = SSCMEx.Model.create(engine, algorithm_id: 0)
   """

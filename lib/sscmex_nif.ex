@@ -58,4 +58,19 @@ defmodule SSCMEx.Nif do
   def device_get_info(_device_resource), do: :erlang.nif_error(:nif_not_loaded)
   def device_get_sensors(_device_resource), do: :erlang.nif_error(:nif_not_loaded)
   def device_get_models(_device_resource), do: :erlang.nif_error(:nif_not_loaded)
+
+  # Camera resource functions
+  def camera_get(_device_resource, _index), do: :erlang.nif_error(:nif_not_loaded)
+  def camera_count(_device_resource), do: :erlang.nif_error(:nif_not_loaded)
+  def camera_init(_camera_resource, _preset_idx), do: :erlang.nif_error(:nif_not_loaded)
+  def camera_deinit(_camera_resource), do: :erlang.nif_error(:nif_not_loaded)
+  def camera_get_presets(_camera_resource), do: :erlang.nif_error(:nif_not_loaded)
+  def camera_get_preset_idx(_camera_resource), do: :erlang.nif_error(:nif_not_loaded)
+  def camera_is_initialized(_camera_resource), do: :erlang.nif_error(:nif_not_loaded)
+  def camera_start_stream(_camera_resource, _mode), do: :erlang.nif_error(:nif_not_loaded)
+  def camera_stop_stream(_camera_resource), do: :erlang.nif_error(:nif_not_loaded)
+  def camera_is_streaming(_camera_resource), do: :erlang.nif_error(:nif_not_loaded)
+  def camera_retrieve_frame(_camera_resource, _format), do: :erlang.nif_error(:nif_not_loaded)
+  def camera_set_ctrl(_camera_resource, _ctrl, _value), do: :erlang.nif_error(:nif_not_loaded)
+  def camera_get_id(_camera_resource), do: :erlang.nif_error(:nif_not_loaded)
 end

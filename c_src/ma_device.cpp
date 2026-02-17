@@ -10,14 +10,19 @@
 #include "sscma/porting/ma_sensor.h"
 #include "sscma/porting/ma_storage.h"
 #include "sscma/porting/ma_transport.h"
+#include "ma_camera_sg200x.h"
 
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 
 namespace ma {
 
 // Singleton instance
 static Device* s_instance = nullptr;
+
+// Static camera instance
+static CameraSG200X s_camera(0);
 
 Device* Device::getInstance() noexcept {
     if (s_instance == nullptr) {
@@ -27,33 +32,38 @@ Device* Device::getInstance() noexcept {
 }
 
 Device::Device() noexcept
-    : m_name("reCamera_SG2002"),
-      m_id("sg2002_recamera"),
-      m_version("1.0.0"),
+    : m_name(MA_BOARD_NAME),
+      m_id("unknown"),
+      m_version("v1"),
       m_bootcount(0),
       m_storage(nullptr) {
-    // Initialize boot count from persistent storage if available
-    // For now, just start at 0
+
+    // Try to read device ID from efuse
+    std::ifstream file("/sys/class/cvi-base/base_efuse_shadow", std::ios::binary);
+    if (file.is_open()) {
+        file.seekg(0x48, std::ios::beg);
+        char id[8];
+        file.read(id, 8);
+        if (file.gcount() == 8) {
+            char buf[17];
+            for (int i = 0; i < 8; i++) {
+                snprintf(buf + i * 2, 3, "%02x", (unsigned char)id[i]);
+            }
+            buf[16] = '\0';
+            m_id = buf;
+        }
+        file.close();
+    }
+
+    // Register camera sensor
+    m_sensors.push_back(&s_camera);
 }
 
 Device::~Device() {
-    // Clean up sensors
-    for (auto* sensor : m_sensors) {
-        delete sensor;
-    }
+    // Note: Sensors are managed externally (static instances)
     m_sensors.clear();
-
-    // Clean up transports
-    for (auto* transport : m_transports) {
-        delete transport;
-    }
     m_transports.clear();
-
-    // Clean up storage
-    if (m_storage) {
-        delete m_storage;
-        m_storage = nullptr;
-    }
+    m_storage = nullptr;
 
     // Clear singleton
     s_instance = nullptr;

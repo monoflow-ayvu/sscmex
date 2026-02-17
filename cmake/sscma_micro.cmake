@@ -26,13 +26,18 @@ add_definitions(-DMA_USE_ENGINE_CVI=1)
 add_definitions(-DMA_USE_FILESYSTEM=1)
 add_definitions(-DMA_USE_ENGINE_TENSOR_NAME=1)
 
-# Collect ALL SSCMA-Micro source files using glob patterns
-# Conditional compilation (MA_USE_ENGINE_CVI) will handle excluding unused engine code
+# Include all SSCMA-Micro sources (core, porting, client, server, extensions).
+# MA_USE_ENGINE_CVI and ma_config_board.h (MA_OSAL_PTHREAD) control which code paths are built.
 file(GLOB_RECURSE SSCMA_MICRO_SOURCES
-    "${SSCMA_MICRO_DIR}/sscma/core/**/*.cpp"
+    "${SSCMA_MICRO_DIR}/sscma/**/*.cpp"
 )
-# Note: extensions excluded due to external dependencies (e.g., Eigen for bytetrack)
-# that require additional setup scripts from SSCMA-Micro
+# Exclude FreeRTOS OSAL - we use pthread only (MA_OSAL_PTHREAD in ma_config_board.h)
+list(FILTER SSCMA_MICRO_SOURCES EXCLUDE REGEX "ma_osal_freertos\\.cpp$")
+# Exclude bytetrack extension - requires Eigen (fetched by SSCMA-Micro's fetch_eigen.sh, not in vendor)
+list(FILTER SSCMA_MICRO_SOURCES EXCLUDE REGEX "bytetrack/")
+# Exclude server/ and client/ - require cJSON (fetched by fetch_cjson.sh, not in vendor)
+list(FILTER SSCMA_MICRO_SOURCES EXCLUDE REGEX "server/")
+list(FILTER SSCMA_MICRO_SOURCES EXCLUDE REGEX "client/")
 
 # Create static library for SSCMA-Micro components
 add_library(sscma_micro STATIC ${SSCMA_MICRO_SOURCES})

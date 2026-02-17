@@ -62,28 +62,57 @@ include_directories("${ERTS_INCLUDE_DIR}")
 # Include c_src directory for ma_config_board.h and other porting headers
 include_directories("${C_SRC}")
 
+# Include sophgo video subsystem headers
+include_directories("${C_SRC}/sophgo/video")
+include_directories("${C_SRC}/sophgo/video/include")
+include_directories("${C_SRC}/sophgo/common")
+
 # Source files
 set(SOURCE_FILES
     "${C_SRC}/sscmex_nif.cpp"
     "${C_SRC}/sscma_porting.cpp"
     "${C_SRC}/ma_device.cpp"
+    "${C_SRC}/ma_camera_sg200x.cpp"
+)
+
+# Sophgo video subsystem sources (glob all .c files)
+file(GLOB_RECURSE SOPHGO_VIDEO_SOURCES
+    "${C_SRC}/sophgo/video/*.c"
+    "${C_SRC}/sophgo/common/*.c"
 )
 
 # Build NIF shared library
-add_library(sscmex_nif SHARED ${SOURCE_FILES})
+add_library(sscmex_nif SHARED ${SOURCE_FILES} ${SOPHGO_VIDEO_SOURCES})
 
 # Link TPU runtime library if SDK is available
 if(DEFINED SG200X_SDK_PATH AND NOT "${SG200X_SDK_PATH}" STREQUAL "")
     # TPU SDK library path
     set(TPU_LIB_DIR "${SG200X_SDK_PATH}/install/soc_sg2002_recamera_emmc/tpu_musl_riscv64/cvitek_tpu_sdk/lib")
 
-    # Link against shared TPU libraries and SSCMA-Micro
+    # Link against shared TPU libraries, CVI MPI (video pipeline), and SSCMA-Micro
+    # CVI MPI libs use short names; see cmake/project.cmake for CVI_MPI_LIB_DIR
     target_link_libraries(sscmex_nif PRIVATE
         sscma_micro           # SSCMA-Micro library
         cviruntime            # Main TPU runtime (shared)
+        venc                  # Video encoder (CVI_VENC_*)
+        vpss                  # VPSS (CVI_VPSS_*)
+        vi                    # Video input (CVI_VI_*)
+        sys                   # System / VB / bind (CVI_SYS_*, CVI_VB_*)
+        isp                   # ISP (CVI_ISP_*)
+        ae                    # Auto exposure (CVI_AE_Register, etc.)
+        awb                   # Auto white balance
+        af                    # Auto focus
+        gdc                   # Geometric distortion correction
+        isp_algo             # ISP algorithms
+        cvi_bin_isp          # CVI bin ISP
+        cvi_bin              # CVI bin
+        sns_sc530ai_2l       # SC530AI_2L sensor (stSnsSC530AI_2L_Obj)
+        sns_ov5647           # OV5647 sensor (if used)
+        vo                   # Video output (get_vo_bin_guardmagic_code for libcvi_bin)
         z                     # zlib
         dl                    # dynamic loading
         pthread               # threads
+        json-c                # JSON library for video subsystem
     )
 
     # Statically link libstdc++ and libgcc to avoid version mismatches with target device
