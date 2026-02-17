@@ -8,6 +8,7 @@
     gnumake
     pkg-config
     ninja
+    clang
 
     # Additional tools
     git

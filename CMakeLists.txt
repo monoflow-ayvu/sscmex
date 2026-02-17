@@ -10,6 +10,11 @@ if(NOT DEFINED PRIV_DIR)
     endif()
 endif()
 
+# Set C_SRC if not defined (for direct CMake invocation)
+if(NOT DEFINED C_SRC OR "${C_SRC}" STREQUAL "")
+    set(C_SRC "${CMAKE_CURRENT_SOURCE_DIR}/c_src")
+endif()
+
 # Get ERTS include directory
 if(DEFINED ERTS_INCLUDE_DIR AND NOT "${ERTS_INCLUDE_DIR}" STREQUAL "")
     set(ERTS_INCLUDE_DIR "${ERTS_INCLUDE_DIR}")
@@ -76,6 +81,13 @@ if(DEFINED SG200X_SDK_PATH AND NOT "${SG200X_SDK_PATH}" STREQUAL "")
         dl                    # dynamic loading
         pthread               # threads
     )
+
+    # Statically link libstdc++ and libgcc to avoid version mismatches with target device
+    # This bundles the C++ runtime with the NIF
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_link_options(sscmex_nif PRIVATE -static-libstdc++ -static-libgcc)
+    endif()
+
     message(STATUS "Linking with TPU runtime library (shared): cviruntime")
 
     # Copy TPU libraries to priv/lib for bundling with the NIF

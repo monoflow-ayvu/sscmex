@@ -1,14 +1,21 @@
 #include <erl_nif.h>
 #include <string>
 #include <cstring>
+#include <forward_list>
+#include <vector>
 
 #include "nif_utils.hpp"
 #include "sscma/core/engine/ma_engine_cvi.h"
+#include "sscma/core/model/ma_model_factory.h"
+#include "sscma/core/model/ma_model_detector.h"
 
 using namespace ma::engine;
+using namespace ma::model;
+using namespace ma;
 
-// Forward declaration
+// Forward declarations
 struct TensorDataRes;
+struct ModelRes;
 
 // Instantiate template for EngineCVI
 template<> ErlNifResourceType* NifRes<EngineCVI>::type = nullptr;
@@ -22,6 +29,15 @@ struct TensorDataRes {
 
 // Instantiate template for TensorDataRes
 template<> ErlNifResourceType* NifRes<TensorDataRes>::type = nullptr;
+
+// Model resource - wraps ma::Model and keeps engine alive
+struct ModelRes {
+    Model* model;                        // The model instance
+    NifRes<EngineCVI>* engine_res;       // Reference to engine (keeps it alive)
+};
+
+// Instantiate template for ModelRes
+template<> ErlNifResourceType* NifRes<ModelRes>::type = nullptr;
 
 // Helper to make atoms
 static ERL_NIF_TERM make_atom(ErlNifEnv *env, const char *name) {
@@ -117,6 +133,143 @@ static void tensor_data_dtor(ErlNifEnv* env, void* obj) {
         delete res->val;
         res->val = nullptr;
     }
+}
+
+// Model resource destructor - removes model and releases engine reference
+static void model_dtor(ErlNifEnv* env, void* obj) {
+    auto* res = static_cast<NifRes<ModelRes>*>(obj);
+    if (res->val) {
+        if (res->val->model) {
+            ModelFactory::remove(res->val->model);
+            res->val->model = nullptr;
+        }
+        if (res->val->engine_res) {
+            enif_release_resource(res->val->engine_res);
+            res->val->engine_res = nullptr;
+        }
+        delete res->val;
+        res->val = nullptr;
+    }
+}
+
+// Helper: atom to pixel format
+static ma_pixel_format_t atom_to_pixel_format(ErlNifEnv* env, ERL_NIF_TERM term) {
+    char atom[32];
+    if (!enif_get_atom(env, term, atom, sizeof(atom), ERL_NIF_LATIN1)) {
+        return MA_PIXEL_FORMAT_UNKNOWN;
+    }
+    if (strcmp(atom, "rgb888") == 0) return MA_PIXEL_FORMAT_RGB888;
+    if (strcmp(atom, "rgb565") == 0) return MA_PIXEL_FORMAT_RGB565;
+    if (strcmp(atom, "yuv422") == 0) return MA_PIXEL_FORMAT_YUV422;
+    if (strcmp(atom, "gray") == 0) return MA_PIXEL_FORMAT_GRAYSCALE;
+    return MA_PIXEL_FORMAT_UNKNOWN;
+}
+
+// Helper: pixel format to atom
+static ERL_NIF_TERM pixel_format_to_atom(ErlNifEnv* env, ma_pixel_format_t format) {
+    switch (format) {
+        case MA_PIXEL_FORMAT_RGB888: return make_atom(env, "rgb888");
+        case MA_PIXEL_FORMAT_RGB565: return make_atom(env, "rgb565");
+        case MA_PIXEL_FORMAT_YUV422: return make_atom(env, "yuv422");
+        case MA_PIXEL_FORMAT_GRAYSCALE: return make_atom(env, "gray");
+        default:                     return make_atom(env, "unknown");
+    }
+}
+
+// Helper: model type to atom
+static ERL_NIF_TERM model_type_to_atom(ErlNifEnv* env, ma_model_type_t type) {
+    switch (type) {
+        case MA_MODEL_TYPE_FOMO:       return make_atom(env, "fomo");
+        case MA_MODEL_TYPE_YOLOV5:     return make_atom(env, "yolov5");
+        case MA_MODEL_TYPE_YOLOV8:     return make_atom(env, "yolov8");
+        case MA_MODEL_TYPE_YOLO11:     return make_atom(env, "yolo11");
+        case MA_MODEL_TYPE_IMCLS:      return make_atom(env, "classifier");
+        case MA_MODEL_TYPE_YOLOV8_POSE: return make_atom(env, "yolov8_pose");
+        case MA_MODEL_TYPE_YOLO11_POSE: return make_atom(env, "yolo11_pose");
+        case MA_MODEL_TYPE_YOLO11_SEG: return make_atom(env, "yolo11_seg");
+        default:                       return make_atom(env, "unknown");
+    }
+}
+
+// Helper: input type to atom
+static ERL_NIF_TERM input_type_to_atom(ErlNifEnv* env, ma_input_type_t type) {
+    switch (type) {
+        case MA_INPUT_TYPE_IMAGE:  return make_atom(env, "image");
+        case MA_INPUT_TYPE_AUDIO:  return make_atom(env, "audio");
+        case MA_INPUT_TYPE_TENSOR: return make_atom(env, "tensor");
+        default:                   return make_atom(env, "unknown");
+    }
+}
+
+// Helper: output type to atom
+static ERL_NIF_TERM output_type_to_atom(ErlNifEnv* env, ma_output_type_t type) {
+    switch (type) {
+        case MA_OUTPUT_TYPE_BBOX:      return make_atom(env, "boxes");
+        case MA_OUTPUT_TYPE_CLASS:     return make_atom(env, "classes");
+        case MA_OUTPUT_TYPE_KEYPOINT:  return make_atom(env, "keypoints");
+        case MA_OUTPUT_TYPE_SEGMENT:   return make_atom(env, "segments");
+        default:                       return make_atom(env, "unknown");
+    }
+}
+
+// Helper: parse SSCMEx.Image struct from Elixir (zero-copy)
+static bool get_image_struct(ErlNifEnv* env, ERL_NIF_TERM term, ma_img_t* img, ErlNifBinary* bin) {
+    if (!enif_is_map(env, term)) return false;
+
+    ERL_NIF_TERM width_term, height_term, format_term, data_term;
+
+    // Get width
+    if (!enif_get_map_value(env, term, make_atom(env, "width"), &width_term)) return false;
+    int width_int;
+    if (!enif_get_int(env, width_term, &width_int)) return false;
+    img->width = (uint16_t)width_int;
+
+    // Get height
+    if (!enif_get_map_value(env, term, make_atom(env, "height"), &height_term)) return false;
+    int height_int;
+    if (!enif_get_int(env, height_term, &height_int)) return false;
+    img->height = (uint16_t)height_int;
+
+    // Get format
+    if (!enif_get_map_value(env, term, make_atom(env, "format"), &format_term)) return false;
+    img->format = atom_to_pixel_format(env, format_term);
+    if (img->format == MA_PIXEL_FORMAT_UNKNOWN) return false;
+
+    // Get data binary (zero-copy - just gets pointer to existing data)
+    if (!enif_get_map_value(env, term, make_atom(env, "data"), &data_term)) return false;
+    if (!enif_inspect_iolist_as_binary(env, data_term, bin)) return false;
+    img->data = bin->data;
+
+    // Set defaults for other fields
+    img->rotate = MA_PIXEL_ROTATE_0;
+    img->timestamp = 0;
+    img->key = false;
+    img->index = 0;
+    img->count = 1;
+    img->physical = false;
+
+    return true;
+}
+
+// Helper: bbox to map
+static ERL_NIF_TERM bbox_to_map(ErlNifEnv* env, const ma_bbox_t& bbox) {
+    ERL_NIF_TERM map = enif_make_new_map(env);
+    enif_make_map_put(env, map, make_atom(env, "x"), enif_make_double(env, bbox.x), &map);
+    enif_make_map_put(env, map, make_atom(env, "y"), enif_make_double(env, bbox.y), &map);
+    enif_make_map_put(env, map, make_atom(env, "w"), enif_make_double(env, bbox.w), &map);
+    enif_make_map_put(env, map, make_atom(env, "h"), enif_make_double(env, bbox.h), &map);
+    enif_make_map_put(env, map, make_atom(env, "score"), enif_make_double(env, bbox.score), &map);
+    enif_make_map_put(env, map, make_atom(env, "target"), enif_make_int(env, bbox.target), &map);
+    return map;
+}
+
+// Helper: perf to map
+static ERL_NIF_TERM perf_to_map(ErlNifEnv* env, const ma_perf_t& perf) {
+    ERL_NIF_TERM map = enif_make_new_map(env);
+    enif_make_map_put(env, map, make_atom(env, "preprocess"), enif_make_int64(env, perf.preprocess), &map);
+    enif_make_map_put(env, map, make_atom(env, "inference"), enif_make_int64(env, perf.inference), &map);
+    enif_make_map_put(env, map, make_atom(env, "postprocess"), enif_make_int64(env, perf.postprocess), &map);
+    return map;
 }
 
 // NIF: Create new engine (uninitialized)
@@ -361,8 +514,154 @@ static ERL_NIF_TERM engine_cvi_run(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
                         : make_error(env, "run_failed");
 }
 
+// ============================================================================
+// Model NIF Functions
+// ============================================================================
+
+// NIF: Create model from engine
+static ERL_NIF_TERM model_create(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    auto* engine_res = NifRes<EngineCVI>::get(env, argv[0]);
+    if (!engine_res || !engine_res->val) return make_error(env, "invalid_engine_resource");
+
+    // Get algorithm_id (default to 0)
+    size_t algorithm_id = 0;
+    if (argc > 1) {
+        int id;
+        if (enif_get_int(env, argv[1], &id)) {
+            algorithm_id = (size_t)id;
+        }
+    }
+
+    // Create model using factory
+    Model* model = ModelFactory::create(engine_res->val, algorithm_id);
+    if (!model) return make_error(env, "model_create_failed");
+
+    // Allocate model resource
+    auto* model_res = NifRes<ModelRes>::allocate(env);
+    if (!model_res) {
+        ModelFactory::remove(model);
+        return make_error(env, "allocation_failed");
+    }
+
+    model_res->val = new ModelRes();
+    model_res->val->model = model;
+    model_res->val->engine_res = engine_res;
+
+    // Keep engine alive while model exists
+    enif_keep_resource(engine_res);
+
+    ERL_NIF_TERM term = enif_make_resource(env, model_res);
+    enif_release_resource(model_res);
+    return make_ok(env, term);
+}
+
+// NIF: Get model type
+static ERL_NIF_TERM model_get_type(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    auto* res = NifRes<ModelRes>::get(env, argv[0]);
+    if (!res || !res->val || !res->val->model) return make_error(env, "invalid_resource");
+    return make_ok(env, model_type_to_atom(env, res->val->model->getType()));
+}
+
+// NIF: Get model name
+static ERL_NIF_TERM model_get_name(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    auto* res = NifRes<ModelRes>::get(env, argv[0]);
+    if (!res || !res->val || !res->val->model) return make_error(env, "invalid_resource");
+    const char* name = res->val->model->getName();
+    return make_ok(env, enif_make_string(env, name ? name : "", ERL_NIF_LATIN1));
+}
+
+// NIF: Get model input type
+static ERL_NIF_TERM model_get_input_type(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    auto* res = NifRes<ModelRes>::get(env, argv[0]);
+    if (!res || !res->val || !res->val->model) return make_error(env, "invalid_resource");
+    return make_ok(env, input_type_to_atom(env, res->val->model->getInputType()));
+}
+
+// NIF: Get model output type
+static ERL_NIF_TERM model_get_output_type(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    auto* res = NifRes<ModelRes>::get(env, argv[0]);
+    if (!res || !res->val || !res->val->model) return make_error(env, "invalid_resource");
+    return make_ok(env, output_type_to_atom(env, res->val->model->getOutputType()));
+}
+
+// NIF: Run model inference on image (DIRTY CPU)
+static ERL_NIF_TERM model_run(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    auto* res = NifRes<ModelRes>::get(env, argv[0]);
+    if (!res || !res->val || !res->val->model) return make_error(env, "invalid_resource");
+
+    // Parse image struct
+    ma_img_t img;
+    ErlNifBinary bin;
+    if (!get_image_struct(env, argv[1], &img, &bin)) {
+        return make_error(env, "invalid_image");
+    }
+
+    // Cast to Detector and run (we only support detectors for now)
+    Detector* detector = static_cast<Detector*>(res->val->model);
+    ma_err_t err = detector->run(&img);
+
+    if (err != MA_OK) return make_error(env, "inference_failed");
+
+    // Get results
+    const std::forward_list<ma_bbox_t>& results = detector->getResults();
+
+    // Convert to list of maps
+    std::vector<ERL_NIF_TERM> bbox_terms;
+    for (const auto& bbox : results) {
+        bbox_terms.push_back(bbox_to_map(env, bbox));
+    }
+
+    ERL_NIF_TERM list = enif_make_list_from_array(env, bbox_terms.data(), bbox_terms.size());
+    return make_ok(env, list);
+}
+
+// NIF: Set model config
+static ERL_NIF_TERM model_set_config(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    auto* res = NifRes<ModelRes>::get(env, argv[0]);
+    if (!res || !res->val || !res->val->model) return make_error(env, "invalid_resource");
+
+    // Get config option atom
+    char opt[64];
+    if (!enif_get_atom(env, argv[1], opt, sizeof(opt), ERL_NIF_LATIN1)) {
+        return make_error(env, "invalid_option");
+    }
+
+    // Get value (double)
+    double value;
+    if (!enif_get_double(env, argv[2], &value)) {
+        return make_error(env, "invalid_value");
+    }
+
+    // Cast to Detector for setConfig
+    Detector* detector = static_cast<Detector*>(res->val->model);
+
+    // Map option string to config
+    ma_model_cfg_opt_t cfg_opt;
+    if (strcmp(opt, "threshold_score") == 0) {
+        cfg_opt = MA_MODEL_CFG_OPT_THRESHOLD;
+    } else if (strcmp(opt, "threshold_nms") == 0) {
+        cfg_opt = MA_MODEL_CFG_OPT_NMS;
+    } else {
+        return make_error(env, "unknown_option");
+    }
+
+    ma_err_t err = detector->setConfig(cfg_opt, (float)value);
+    return err == MA_OK ? make_ok(env, make_atom(env, "ok"))
+                        : make_error(env, "config_failed");
+}
+
+// NIF: Get model performance metrics
+static ERL_NIF_TERM model_get_perf(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    auto* res = NifRes<ModelRes>::get(env, argv[0]);
+    if (!res || !res->val || !res->val->model) return make_error(env, "invalid_resource");
+
+    ma_perf_t perf = res->val->model->getPerf();
+    return make_ok(env, perf_to_map(env, perf));
+}
+
 // NIF function table
 static ErlNifFunc nif_functions[] = {
+    // Engine functions
     {"engine_cvi_new", 0, engine_cvi_new, 0},
     {"engine_cvi_init", 1, engine_cvi_init, 0},
     {"engine_cvi_load", 2, engine_cvi_load, ERL_NIF_DIRTY_JOB_CPU_BOUND},
@@ -378,6 +677,17 @@ static ErlNifFunc nif_functions[] = {
     {"engine_cvi_set_input", 3, engine_cvi_set_input, 0},
     {"engine_cvi_get_input_num", 2, engine_cvi_get_input_num, 0},
     {"engine_cvi_get_output_num", 2, engine_cvi_get_output_num, 0},
+
+    // Model functions
+    {"model_create", 1, model_create, 0},
+    {"model_create", 2, model_create, 0},
+    {"model_get_type", 1, model_get_type, 0},
+    {"model_get_name", 1, model_get_name, 0},
+    {"model_get_input_type", 1, model_get_input_type, 0},
+    {"model_get_output_type", 1, model_get_output_type, 0},
+    {"model_run", 2, model_run, ERL_NIF_DIRTY_JOB_CPU_BOUND},
+    {"model_set_config", 3, model_set_config, 0},
+    {"model_get_perf", 1, model_get_perf, 0},
 };
 
 // NIF initialization - register resource type
@@ -397,7 +707,14 @@ static int on_load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info) {
         env, "Elixir.SSCMEx.Nif", "tensor_data",
         tensor_data_dtor, flags, NULL);
 
-    return NifRes<TensorDataRes>::type ? 0 : -1;
+    if (!NifRes<TensorDataRes>::type) return -1;
+
+    // Register model resource type
+    NifRes<ModelRes>::type = enif_open_resource_type(
+        env, "Elixir.SSCMEx.Nif", "model",
+        model_dtor, flags, NULL);
+
+    return NifRes<ModelRes>::type ? 0 : -1;
 }
 
 // NIF reload

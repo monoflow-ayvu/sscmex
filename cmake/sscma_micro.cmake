@@ -13,6 +13,7 @@ message(STATUS "SSCMA-Micro found at: ${SSCMA_MICRO_DIR}")
 
 # Include directories for SSCMA-Micro
 include_directories("${SSCMA_MICRO_DIR}")
+include_directories("${SSCMA_MICRO_DIR}/sscma")  # For extension files to find "core/ma_types.h"
 include_directories("${SSCMA_MICRO_DIR}/3rdparty")
 include_directories("${SSCMA_MICRO_DIR}/3rdparty/eigen")
 include_directories("${SSCMA_MICRO_DIR}/3rdparty/json")
@@ -25,10 +26,13 @@ add_definitions(-DMA_USE_ENGINE_CVI=1)
 add_definitions(-DMA_USE_FILESYSTEM=1)
 add_definitions(-DMA_USE_ENGINE_TENSOR_NAME=1)
 
-# SSCMA-Micro source files needed for CVI engine
-set(SSCMA_MICRO_SOURCES
-    "${SSCMA_MICRO_DIR}/sscma/core/engine/ma_engine_cvi.cpp"
+# Collect ALL SSCMA-Micro source files using glob patterns
+# Conditional compilation (MA_USE_ENGINE_CVI) will handle excluding unused engine code
+file(GLOB_RECURSE SSCMA_MICRO_SOURCES
+    "${SSCMA_MICRO_DIR}/sscma/core/**/*.cpp"
 )
+# Note: extensions excluded due to external dependencies (e.g., Eigen for bytetrack)
+# that require additional setup scripts from SSCMA-Micro
 
 # Create static library for SSCMA-Micro components
 add_library(sscma_micro STATIC ${SSCMA_MICRO_SOURCES})
@@ -51,6 +55,12 @@ if(DEFINED SG200X_SDK_PATH AND NOT "${SG200X_SDK_PATH}" STREQUAL "")
     target_link_libraries(sscma_micro PUBLIC
         cviruntime
     )
+endif()
+
+# Statically link libstdc++ and libgcc to avoid version mismatches with target device
+# This bundles the C++ runtime with the NIF
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_link_options(sscma_micro PUBLIC -static-libstdc++ -static-libgcc)
 endif()
 
 message(STATUS "SSCMA-Micro configured with CVI engine support")
