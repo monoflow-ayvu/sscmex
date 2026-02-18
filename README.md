@@ -68,3 +68,25 @@ IO.inspect(perf, label: "perf")
 - `SSCMEx.Camera.retrieve_frame/2` now returns `%SSCMEx.Image{}` directly.
 - For one-shot tests, keep `fps` low (for example `3`) to reduce memory pressure.
 
+## Runtime observability (SG2002)
+
+When debugging camera/TPU contention, these runtime stats are useful:
+
+- VB/ION pool status (best signal for camera-side memory pressure):
+  - `cat /proc/cvitek/vb`
+  - Look at per-pool `BlkSz`, `BlkCnt`, `Free`, and especially `MinFree`.
+  - If `MinFree` drops near `0`, the pipeline is close to buffer exhaustion.
+
+- TPU usage profiling:
+  - Enable: `echo 1 > /proc/tpu/usage_profiling`
+  - Read: `cat /proc/tpu/usage_profiling`
+  - Disable: `echo 0 > /proc/tpu/usage_profiling`
+
+- Per-inference model timings (already exposed by SSCMEx):
+  - `{:ok, perf} = SSCMEx.Model.get_perf(model)`
+  - Returns `%{preprocess: ms, inference: ms, postprocess: ms}` from the last run.
+
+- Optional bandwidth monitor (if your image enables it):
+  - `echo 1 > /proc/mon/bw_profiling`
+  - `cat /proc/mon/profiling_window_ms`
+
