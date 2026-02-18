@@ -85,7 +85,17 @@ jobs:
           RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
         shell: bash
         run: |
-          version="$(devenv shell -- bash -lc 'MIX_ENV=prod mix run --no-start --no-compile -e "IO.write(Mix.Project.config()[:version])"')"
+          version="$(
+            devenv shell -- bash -lc '
+              MIX_ENV=prod mix run --no-start --no-compile -e "IO.puts(\"SSCMEX_VERSION=\" <> to_string(Mix.Project.config()[:version]))"
+            ' | tr -d '\r' | sed -n 's/^SSCMEX_VERSION=//p' | tail -n1
+          )"
+
+          if [ -z "${version}" ]; then
+            echo "Unable to extract Mix project version from devenv output"
+            exit 1
+          fi
+
           expected_tag="v${version}"
 
           if [ "${RELEASE_TAG}" != "${expected_tag}" ]; then
