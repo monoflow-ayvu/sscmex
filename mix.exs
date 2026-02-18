@@ -1,7 +1,7 @@
 defmodule Sscmex.MixProject do
   use Mix.Project
 
-  @version "0.1.6"
+  @version "0.1.7"
   @github_url "https://github.com/monoflow-ayvu/sscmex"
 
   def project do
