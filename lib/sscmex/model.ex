@@ -102,7 +102,8 @@ defmodule SSCMEx.Model do
           mask: segment_mask()
         }
 
-  @type inference_result :: detection() | classification() | point() | keypoint_result() | segment_result()
+  @type inference_result ::
+          detection() | classification() | point() | keypoint_result() | segment_result()
 
   @type perf :: %{
           preprocess: integer(),
