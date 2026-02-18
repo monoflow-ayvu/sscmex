@@ -21,7 +21,9 @@ permissions:
 
 env:
   MIX_ENV: prod
+  MIX_TARGET: nerves_system_sg2002
   ELIXIR_MAKE_CACHE_DIR: cache
+  SG200X_FHS: "1"
 
 jobs:
   release:
@@ -52,19 +54,29 @@ jobs:
           ref: ${{ steps.release_tag.outputs.tag }}
           submodules: recursive
 
-      - uses: cachix/install-nix-action@v31
+      - name: Set up BEAM toolchain
+        uses: erlef/setup-beam@v1
         with:
-          nix_path: nixpkgs=channel:nixos-25.05
+          otp-version: "28.3"
+          elixir-version: "1.18.4"
 
-      - uses: cachix/cachix-action@v16
-        with:
-          name: devenv
-
-      - name: Install devenv.sh
-        run: nix profile install nixpkgs#devenv
-
-      - name: Restore nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Install system build tools
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            make \
+            pkg-config \
+            ninja-build \
+            python3 \
+            curl \
+            git \
+            unzip \
+            wget \
+            file \
+            ca-certificates
 
       - name: Restore Mix cache
         uses: actions/cache@v4
@@ -77,8 +89,70 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-mix-
 
+      - name: Install Hex and Rebar
+        shell: bash
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+
+      - name: Install SG2002 SDK and host-tools
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RECAMERA_ROOT="$GITHUB_WORKSPACE/.devenv/state/sg200x-sdk"
+          SDK_DIR="$RECAMERA_ROOT/sg2002_recamera_emmc"
+          SDK_TARBALL="$RECAMERA_ROOT/reCameraOS_sdk_v0.2.0.tar.gz"
+          HOST_TOOLS_DIR="$RECAMERA_ROOT/host-tools"
+
+          mkdir -p "$RECAMERA_ROOT"
+
+          if [ ! -d "$SDK_DIR" ]; then
+            if [ ! -f "$SDK_TARBALL" ]; then
+              wget -O "$SDK_TARBALL" \
+                "https://github.com/Seeed-Studio/reCamera-OS/releases/download/0.2.0/reCameraOS_sdk_v0.2.0.tar.gz"
+            fi
+            tar -xzf "$SDK_TARBALL" -C "$RECAMERA_ROOT" --strip-components=0
+          fi
+
+          while IFS= read -r broken_link; do
+            rm -f "$broken_link"
+          done < <(find "$RECAMERA_ROOT" -type l ! -exec test -e {} \; -print)
+
+          if [ ! -d "$HOST_TOOLS_DIR/.git" ]; then
+            rm -rf "$HOST_TOOLS_DIR"
+            git clone --depth 1 https://github.com/sophgo/host-tools.git "$HOST_TOOLS_DIR"
+          fi
+
+          COMPILER_DIR="$HOST_TOOLS_DIR/gcc/riscv64-linux-musl-x86_64/bin"
+
+          for tool in gcc g++ objcopy objdump ar as ld nm ranlib strip; do
+            if [ -f "$COMPILER_DIR/riscv64-linux-musl-$tool" ] && [ ! -f "$COMPILER_DIR/riscv64-unknown-linux-musl-$tool" ]; then
+              ln -sf "riscv64-linux-musl-$tool" "$COMPILER_DIR/riscv64-unknown-linux-musl-$tool"
+            fi
+          done
+
+          {
+            echo "SG200X_SDK_PATH=$SDK_DIR"
+            echo "CMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/cmake/toolchain-riscv64-linux-musl-x86_64.cmake"
+          } >> "$GITHUB_ENV"
+
+          echo "$COMPILER_DIR" >> "$GITHUB_PATH"
+
+      - name: Toolchain preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          command -v riscv64-unknown-linux-musl-gcc
+          command -v riscv64-unknown-linux-musl-g++
+          file "$(command -v riscv64-unknown-linux-musl-gcc)"
+          riscv64-unknown-linux-musl-gcc --version
+          riscv64-unknown-linux-musl-g++ --version
+          printf 'int main(void){return 0;}\n' | riscv64-unknown-linux-musl-gcc -x c - -c -o /tmp/sscmex_toolchain_smoke.o
+
       - name: Fetch dependencies
-        run: devenv shell -- bash -lc "MIX_ENV=prod mix deps.get"
+        run: MIX_ENV=prod mix deps.get
 
       - name: Verify tag matches mix version
         env:
@@ -86,13 +160,12 @@ jobs:
         shell: bash
         run: |
           version="$(
-            devenv shell -- bash -lc '
-              MIX_ENV=prod mix run --no-start --no-compile -e "IO.puts(\"SSCMEX_VERSION=\" <> to_string(Mix.Project.config()[:version]))"
-            ' | tr -d '\r' | sed -n 's/^SSCMEX_VERSION=//p' | tail -n1
+            MIX_ENV=prod mix run --no-start --no-compile -e "IO.puts(\"SSCMEX_VERSION=\" <> to_string(Mix.Project.config()[:version]))" \
+            | tr -d '\r' | sed -n 's/^SSCMEX_VERSION=//p' | tail -n1
           )"
 
           if [ -z "${version}" ]; then
-            echo "Unable to extract Mix project version from devenv output"
+            echo "Unable to extract Mix project version"
             exit 1
           fi
 
@@ -113,7 +186,7 @@ jobs:
           TARGET_ARCH: riscv64
           TARGET_OS: buildroot
           TARGET_ABI: linux-musl
-        run: devenv shell -- bash -lc "MIX_ENV=prod mix elixir_make.precompile"
+        run: MIX_ENV=prod mix elixir_make.precompile
 
       - name: Verify precompiled tarball asset
         shell: bash
@@ -139,7 +212,7 @@ jobs:
         shell: bash
         run: |
           for attempt in $(seq 1 10); do
-            devenv shell -- bash -lc "MIX_ENV=prod mix elixir_make.checksum --all --ignore-unavailable"
+            MIX_ENV=prod mix elixir_make.checksum --all --ignore-unavailable
 
             if python - <<'PY'
           from pathlib import Path
@@ -190,4 +263,4 @@ jobs:
             exit 1
           fi
 
-          devenv shell -- bash -lc "MIX_ENV=prod mix hex.publish --yes"
+          MIX_ENV=prod mix hex.publish --yes
