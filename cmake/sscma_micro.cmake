@@ -38,8 +38,6 @@ list(FILTER SSCMA_MICRO_SOURCES EXCLUDE REGEX "bytetrack/")
 # Exclude server/ and client/ - require cJSON (fetched by fetch_cjson.sh, not in vendor)
 list(FILTER SSCMA_MICRO_SOURCES EXCLUDE REGEX "server/")
 list(FILTER SSCMA_MICRO_SOURCES EXCLUDE REGEX "client/")
-# Temporarily exclude YOLO26 pose implementation due upstream type mismatch compile failure.
-list(FILTER SSCMA_MICRO_SOURCES EXCLUDE REGEX "ma_model_yolo26_pose\\.cpp$")
 
 # Create static library for SSCMA-Micro components
 add_library(sscma_micro STATIC ${SSCMA_MICRO_SOURCES})

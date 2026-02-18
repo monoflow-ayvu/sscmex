@@ -16,9 +16,8 @@ defmodule SSCMEx.Model do
   - `:yolo11_pose` - YOLO11 pose estimation
   - `:yolo11_seg` - YOLO11 instance segmentation
   - `:yolo26` - YOLO26 object detection
-  - `:yolo26_seg` - YOLO26 instance segmentation
 
-  Note: `:yolo26_pose` is temporarily disabled pending an upstream SSCMA-Micro fix.
+  Note: With the currently pinned SSCMA-Micro commit, YOLO26 is detection-only.
 
   ## Example
 
@@ -59,7 +58,6 @@ defmodule SSCMEx.Model do
           | :yolo11_pose
           | :yolo11_seg
           | :yolo26
-          | :yolo26_seg
           | :unknown
   @type input_type :: :image | :audio | :text | :unknown
   @type output_type :: :tensor | :boxes | :classes | :points | :keypoints | :segments | :unknown
