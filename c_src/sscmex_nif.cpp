@@ -8,7 +8,11 @@
 #include "nif_utils.hpp"
 #include "sscma/core/engine/ma_engine_cvi.h"
 #include "sscma/core/model/ma_model_factory.h"
+#include "sscma/core/model/ma_model_classifier.h"
 #include "sscma/core/model/ma_model_detector.h"
+#include "sscma/core/model/ma_model_point_detector.h"
+#include "sscma/core/model/ma_model_pose_detector.h"
+#include "sscma/core/model/ma_model_segmentor.h"
 #include "sscma/porting/ma_device.h"
 #include "sscma/porting/ma_camera.h"
 
@@ -254,8 +258,10 @@ static ERL_NIF_TERM input_type_to_atom(ErlNifEnv* env, ma_input_type_t type) {
 // Helper: output type to atom
 static ERL_NIF_TERM output_type_to_atom(ErlNifEnv* env, ma_output_type_t type) {
     switch (type) {
+        case MA_OUTPUT_TYPE_TENSOR:    return make_atom(env, "tensor");
         case MA_OUTPUT_TYPE_BBOX:      return make_atom(env, "boxes");
         case MA_OUTPUT_TYPE_CLASS:     return make_atom(env, "classes");
+        case MA_OUTPUT_TYPE_POINT:     return make_atom(env, "points");
         case MA_OUTPUT_TYPE_KEYPOINT:  return make_atom(env, "keypoints");
         case MA_OUTPUT_TYPE_SEGMENT:   return make_atom(env, "segments");
         default:                       return make_atom(env, "unknown");
@@ -409,6 +415,75 @@ static ERL_NIF_TERM bbox_to_map(ErlNifEnv* env, const ma_bbox_t& bbox) {
     enif_make_map_put(env, map, make_atom(env, "score"), enif_make_double(env, bbox.score), &map);
     enif_make_map_put(env, map, make_atom(env, "target"), enif_make_int(env, bbox.target), &map);
     return map;
+}
+
+// Helper: class result to map
+static ERL_NIF_TERM class_to_map(ErlNifEnv* env, const ma_class_t& cls) {
+    ERL_NIF_TERM map = enif_make_new_map(env);
+    enif_make_map_put(env, map, make_atom(env, "score"), enif_make_double(env, cls.score), &map);
+    enif_make_map_put(env, map, make_atom(env, "target"), enif_make_int(env, cls.target), &map);
+    return map;
+}
+
+// Helper: point result to map
+static ERL_NIF_TERM point_to_map(ErlNifEnv* env, const ma_point_t& point) {
+    ERL_NIF_TERM map = enif_make_new_map(env);
+    enif_make_map_put(env, map, make_atom(env, "x"), enif_make_double(env, point.x), &map);
+    enif_make_map_put(env, map, make_atom(env, "y"), enif_make_double(env, point.y), &map);
+    enif_make_map_put(env, map, make_atom(env, "score"), enif_make_double(env, point.score), &map);
+    enif_make_map_put(env, map, make_atom(env, "target"), enif_make_int(env, point.target), &map);
+    return map;
+}
+
+// Helper: 3D point to map
+static ERL_NIF_TERM pt3f_to_map(ErlNifEnv* env, const ma_pt3f_t& point) {
+    ERL_NIF_TERM map = enif_make_new_map(env);
+    enif_make_map_put(env, map, make_atom(env, "x"), enif_make_double(env, point.x), &map);
+    enif_make_map_put(env, map, make_atom(env, "y"), enif_make_double(env, point.y), &map);
+    enif_make_map_put(env, map, make_atom(env, "z"), enif_make_double(env, point.z), &map);
+    return map;
+}
+
+// Helper: keypoint result to map
+static ERL_NIF_TERM keypoint_to_map(ErlNifEnv* env, const ma_keypoint3f_t& keypoint) {
+    ERL_NIF_TERM map = enif_make_new_map(env);
+    enif_make_map_put(env, map, make_atom(env, "box"), bbox_to_map(env, keypoint.box), &map);
+
+    std::vector<ERL_NIF_TERM> point_terms;
+    point_terms.reserve(keypoint.pts.size());
+    for (const auto& point : keypoint.pts) {
+        point_terms.push_back(pt3f_to_map(env, point));
+    }
+
+    ERL_NIF_TERM points_list =
+        point_terms.empty() ? enif_make_list(env, 0) : enif_make_list_from_array(env, point_terms.data(), point_terms.size());
+    enif_make_map_put(env, map, make_atom(env, "points"), points_list, &map);
+    return map;
+}
+
+// Helper: segmentation result to map
+static bool segment_to_map(ErlNifEnv* env, const ma_segm2f_t& segment, ERL_NIF_TERM* out_term) {
+    if (!out_term) return false;
+
+    ErlNifBinary mask_bin;
+    if (!enif_alloc_binary(segment.mask.data.size(), &mask_bin)) {
+        return false;
+    }
+
+    if (!segment.mask.data.empty()) {
+        memcpy(mask_bin.data, segment.mask.data.data(), segment.mask.data.size());
+    }
+
+    ERL_NIF_TERM mask_map = enif_make_new_map(env);
+    enif_make_map_put(env, mask_map, make_atom(env, "width"), enif_make_int(env, segment.mask.width), &mask_map);
+    enif_make_map_put(env, mask_map, make_atom(env, "height"), enif_make_int(env, segment.mask.height), &mask_map);
+    enif_make_map_put(env, mask_map, make_atom(env, "data"), enif_make_binary(env, &mask_bin), &mask_map);
+
+    ERL_NIF_TERM map = enif_make_new_map(env);
+    enif_make_map_put(env, map, make_atom(env, "box"), bbox_to_map(env, segment.box), &map);
+    enif_make_map_put(env, map, make_atom(env, "mask"), mask_map, &map);
+    *out_term = map;
+    return true;
 }
 
 // Helper: perf to map
@@ -754,27 +829,89 @@ static ERL_NIF_TERM model_run(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[
     }
 
     const ma_output_type_t output_type = res->val->model->getOutputType();
-    if (output_type != MA_OUTPUT_TYPE_BBOX && output_type != MA_OUTPUT_TYPE_TENSOR) {
-        return make_error(env, "unsupported_model_type_for_run");
+    switch (output_type) {
+        case MA_OUTPUT_TYPE_BBOX: {
+            Detector* detector = static_cast<Detector*>(res->val->model);
+            ma_err_t err = detector->run(&img);
+            if (err != MA_OK) return make_error(env, "inference_failed");
+
+            const std::forward_list<ma_bbox_t>& results = detector->getResults();
+            std::vector<ERL_NIF_TERM> terms;
+            for (const auto& bbox : results) {
+                terms.push_back(bbox_to_map(env, bbox));
+            }
+
+            ERL_NIF_TERM list = terms.empty() ? enif_make_list(env, 0) : enif_make_list_from_array(env, terms.data(), terms.size());
+            return make_ok(env, list);
+        }
+
+        case MA_OUTPUT_TYPE_CLASS: {
+            Classifier* classifier = static_cast<Classifier*>(res->val->model);
+            ma_err_t err = classifier->run(&img);
+            if (err != MA_OK) return make_error(env, "inference_failed");
+
+            const std::forward_list<ma_class_t>& results = classifier->getResults();
+            std::vector<ERL_NIF_TERM> terms;
+            for (const auto& cls : results) {
+                terms.push_back(class_to_map(env, cls));
+            }
+
+            ERL_NIF_TERM list = terms.empty() ? enif_make_list(env, 0) : enif_make_list_from_array(env, terms.data(), terms.size());
+            return make_ok(env, list);
+        }
+
+        case MA_OUTPUT_TYPE_POINT: {
+            PointDetector* point_detector = static_cast<PointDetector*>(res->val->model);
+            ma_err_t err = point_detector->run(&img);
+            if (err != MA_OK) return make_error(env, "inference_failed");
+
+            const std::forward_list<ma_point_t>& results = point_detector->getResults();
+            std::vector<ERL_NIF_TERM> terms;
+            for (const auto& point : results) {
+                terms.push_back(point_to_map(env, point));
+            }
+
+            ERL_NIF_TERM list = terms.empty() ? enif_make_list(env, 0) : enif_make_list_from_array(env, terms.data(), terms.size());
+            return make_ok(env, list);
+        }
+
+        case MA_OUTPUT_TYPE_KEYPOINT: {
+            PoseDetector* pose_detector = static_cast<PoseDetector*>(res->val->model);
+            ma_err_t err = pose_detector->run(&img);
+            if (err != MA_OK) return make_error(env, "inference_failed");
+
+            const std::forward_list<ma_keypoint3f_t>& results = pose_detector->getResults();
+            std::vector<ERL_NIF_TERM> terms;
+            for (const auto& keypoint : results) {
+                terms.push_back(keypoint_to_map(env, keypoint));
+            }
+
+            ERL_NIF_TERM list = terms.empty() ? enif_make_list(env, 0) : enif_make_list_from_array(env, terms.data(), terms.size());
+            return make_ok(env, list);
+        }
+
+        case MA_OUTPUT_TYPE_SEGMENT: {
+            Segmentor* segmentor = static_cast<Segmentor*>(res->val->model);
+            ma_err_t err = segmentor->run(&img);
+            if (err != MA_OK) return make_error(env, "inference_failed");
+
+            const std::forward_list<ma_segm2f_t>& results = segmentor->getResults();
+            std::vector<ERL_NIF_TERM> terms;
+            for (const auto& segment : results) {
+                ERL_NIF_TERM term;
+                if (!segment_to_map(env, segment, &term)) {
+                    return make_error(env, "binary_allocation_failed");
+                }
+                terms.push_back(term);
+            }
+
+            ERL_NIF_TERM list = terms.empty() ? enif_make_list(env, 0) : enif_make_list_from_array(env, terms.data(), terms.size());
+            return make_ok(env, list);
+        }
+
+        default:
+            return make_error(env, "unsupported_output_type_for_run");
     }
-
-    // Cast to Detector and run (we only support detectors for now)
-    Detector* detector = static_cast<Detector*>(res->val->model);
-    ma_err_t err = detector->run(&img);
-
-    if (err != MA_OK) return make_error(env, "inference_failed");
-
-    // Get results
-    const std::forward_list<ma_bbox_t>& results = detector->getResults();
-
-    // Convert to list of maps
-    std::vector<ERL_NIF_TERM> bbox_terms;
-    for (const auto& bbox : results) {
-        bbox_terms.push_back(bbox_to_map(env, bbox));
-    }
-
-    ERL_NIF_TERM list = enif_make_list_from_array(env, bbox_terms.data(), bbox_terms.size());
-    return make_ok(env, list);
 }
 
 static bool parse_model_config_opt(const char* opt, ma_model_cfg_opt_t* cfg_opt) {

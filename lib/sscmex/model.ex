@@ -56,7 +56,7 @@ defmodule SSCMEx.Model do
           | :yolo11_seg
           | :unknown
   @type input_type :: :image | :audio | :text | :unknown
-  @type output_type :: :boxes | :classes | :keypoints | :segments | :unknown
+  @type output_type :: :tensor | :boxes | :classes | :points | :keypoints | :segments | :unknown
   @type config_option :: :threshold_score | :threshold_nms
 
   @type detection :: %{
@@ -67,6 +67,43 @@ defmodule SSCMEx.Model do
           score: float(),
           target: integer()
         }
+
+  @type classification :: %{
+          score: float(),
+          target: integer()
+        }
+
+  @type point :: %{
+          x: float(),
+          y: float(),
+          score: float(),
+          target: integer()
+        }
+
+  @type keypoint :: %{
+          x: float(),
+          y: float(),
+          z: float()
+        }
+
+  @type keypoint_result :: %{
+          box: detection(),
+          points: [keypoint()]
+        }
+
+  @type segment_mask :: %{
+          width: non_neg_integer(),
+          height: non_neg_integer(),
+          data: binary()
+        }
+
+  @type segment_result :: %{
+          box: detection(),
+          mask: segment_mask()
+        }
+
+  @type inference_result ::
+          detection() | classification() | point() | keypoint_result() | segment_result()
 
   @type perf :: %{
           preprocess: integer(),
@@ -168,22 +205,22 @@ defmodule SSCMEx.Model do
 
   ## Returns
 
-  For detector models, returns a list of detections:
+  Returns a list of decoded results based on the model output type:
 
-      [%{x: 0.5, y: 0.3, w: 0.1, h: 0.2, score: 0.95, target: 0}, ...]
+  - `:boxes` -> `[%{x, y, w, h, score, target}, ...]`
+  - `:classes` -> `[%{score, target}, ...]`
+  - `:points` -> `[%{x, y, score, target}, ...]`
+  - `:keypoints` -> `[%{box: %{...}, points: [%{x, y, z}, ...]}, ...]`
+  - `:segments` -> `[%{box: %{...}, mask: %{width, height, data}}, ...]`
 
-  Where:
-  - `x`, `y` - Center coordinates (normalized 0-1)
-  - `w`, `h` - Width and height (normalized 0-1)
-  - `score` - Confidence score
-  - `target` - Class ID
+  You can inspect the output type with `get_output_type/1`.
 
   ## Examples
 
       image = SSCMEx.Image.new(640, 480, :rgb888, frame_data)
-      {:ok, detections} = SSCMEx.Model.run(model, image)
+      {:ok, results} = SSCMEx.Model.run(model, image)
   """
-  @spec run(t(), SSCMEx.Image.t()) :: {:ok, [detection()]} | {:error, term()}
+  @spec run(t(), SSCMEx.Image.t()) :: {:ok, [inference_result()]} | {:error, term()}
   def run(%__MODULE__{resource: resource}, %SSCMEx.Image{} = image) do
     SSCMEx.Nif.model_run(resource, image)
   end

@@ -52,16 +52,26 @@ Process.sleep(1500)
 # 5) Grab frame and run inference
 # retrieve_frame already returns %SSCMEx.Image{}
 {:ok, image} = SSCMEx.Camera.retrieve_frame(camera, :rgb888)
-{:ok, detections} = SSCMEx.Model.run(model, image)
+{:ok, results} = SSCMEx.Model.run(model, image)
 {:ok, perf} = SSCMEx.Model.get_perf(model)
 
-IO.inspect(detections, label: "detections")
+IO.inspect(results, label: "results")
 IO.inspect(perf, label: "perf")
 
 # 6) Cleanup
 {:ok, :stopped} = SSCMEx.Camera.stop_stream(camera)
 {:ok, :deinitialized} = SSCMEx.Camera.deinit(camera)
 ```
+
+`SSCMEx.Model.run/2` returns different result maps depending on model output type:
+
+- `:boxes` (detection): `%{x, y, w, h, score, target}`
+- `:classes` (classification): `%{score, target}`
+- `:points`: `%{x, y, score, target}`
+- `:keypoints` (pose): `%{box: %{x, y, w, h, score, target}, points: [%{x, y, z}, ...]}`
+- `:segments` (segmentation): `%{box: %{x, y, w, h, score, target}, mask: %{width, height, data}}`
+
+For backward compatibility, detection models still return the same bbox fields (`x`, `y`, `w`, `h`, `score`, `target`).
 
 ## Notes
 
