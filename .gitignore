@@ -24,6 +24,7 @@ sscmex-*.tar
 
 
 build/
+checksum.exs
 .nix-*
 compile_commands.json
 

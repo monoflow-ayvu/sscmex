@@ -241,6 +241,7 @@ static ERL_NIF_TERM model_type_to_atom(ErlNifEnv* env, ma_model_type_t type) {
         case MA_MODEL_TYPE_YOLOV8_POSE: return make_atom(env, "yolov8_pose");
         case MA_MODEL_TYPE_YOLO11_POSE: return make_atom(env, "yolo11_pose");
         case MA_MODEL_TYPE_YOLO11_SEG: return make_atom(env, "yolo11_seg");
+        case MA_MODEL_TYPE_YOLO26:     return make_atom(env, "yolo26");
         default:                       return make_atom(env, "unknown");
     }
 }

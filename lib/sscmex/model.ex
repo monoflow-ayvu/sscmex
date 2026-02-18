@@ -15,6 +15,9 @@ defmodule SSCMEx.Model do
   - `:yolov8_pose` - YOLOv8 pose estimation
   - `:yolo11_pose` - YOLO11 pose estimation
   - `:yolo11_seg` - YOLO11 instance segmentation
+  - `:yolo26` - YOLO26 object detection
+
+  Note: With the currently pinned SSCMA-Micro commit, YOLO26 is detection-only.
 
   ## Example
 
@@ -54,6 +57,7 @@ defmodule SSCMEx.Model do
           | :yolov8_pose
           | :yolo11_pose
           | :yolo11_seg
+          | :yolo26
           | :unknown
   @type input_type :: :image | :audio | :text | :unknown
   @type output_type :: :tensor | :boxes | :classes | :points | :keypoints | :segments | :unknown
