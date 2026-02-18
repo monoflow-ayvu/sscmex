@@ -204,33 +204,35 @@ jobs:
           fail_on_unmatched_files: true
           overwrite_files: true
 
-      - name: Build checksum.exs from published release assets
+      - name: Build checksum.exs from local precompiled tarballs
         env:
-          TARGET_ARCH: riscv64
-          TARGET_OS: buildroot
-          TARGET_ABI: linux-musl
+          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
         shell: bash
         run: |
-          for attempt in $(seq 1 10); do
-            MIX_ENV=prod mix elixir_make.checksum --all --ignore-unavailable
+          python - <<'PY'
+          import glob
+          import hashlib
+          import os
 
-            if python - <<'PY'
-          from pathlib import Path
+          release_tag = os.environ["RELEASE_TAG"]
+          release_version = release_tag[1:] if release_tag.startswith("v") else release_tag
+          pattern = f"cache/*-{release_version}.tar.gz"
 
-          checksum = Path("checksum.exs").read_text(encoding="utf-8")
-          raise SystemExit(0 if "sscmex-nif-" in checksum and "sha256:" in checksum else 1)
+          entries = {}
+          for path in sorted(glob.glob(pattern)):
+            with open(path, "rb") as f:
+              digest = hashlib.sha256(f.read()).hexdigest()
+            entries[os.path.basename(path)] = f"sha256:{digest}"
+
+          if not entries:
+            raise SystemExit(f"No precompiled tarballs found under {pattern}")
+
+          with open("checksum.exs", "w", encoding="utf-8") as f:
+            f.write("%{\n")
+            for name in sorted(entries):
+              f.write(f'  "{name}" => "{entries[name]}",\n')
+            f.write("}\n")
           PY
-            then
-              echo "Generated checksum.exs with precompiled entries."
-              exit 0
-            fi
-
-            echo "checksum.exs not ready yet (attempt ${attempt}/10), retrying in 5 seconds..."
-            sleep 5
-          done
-
-          echo "Failed to generate checksum.exs with precompiled entries."
-          exit 1
 
       - name: Verify checksum.exs has precompiled entries
         shell: bash
