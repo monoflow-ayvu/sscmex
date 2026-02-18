@@ -10,11 +10,6 @@ on:
         description: "Tag to build (for example: v1.2.3)"
         required: true
         type: string
-      publish_hex:
-        description: "Publish to Hex.pm after creating/updating the release"
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: write
@@ -255,13 +250,12 @@ jobs:
           overwrite_files: true
 
       - name: Publish to Hex.pm
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_hex }}
         env:
           HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
         shell: bash
         run: |
           if [ -z "${HEX_API_KEY}" ]; then
-            echo "HEX_API_KEY secret is required when publish_hex=true"
+            echo "HEX_API_KEY secret is required for release publish"
             exit 1
           fi
 
