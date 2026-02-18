@@ -113,14 +113,23 @@
     COMPILER_ROOT="$RECAMERA_ROOT/host-tools/gcc/riscv64-linux-musl-x86_64"
     COMPILER_DIR="$COMPILER_ROOT/bin"
 
-    # Patch cross-compiler in-place for NixOS compatibility (only once)
-    if [ -d "$COMPILER_ROOT" ] && [ ! -f "$COMPILER_ROOT/.nixos-patched" ]; then
+    # Patch cross-compiler in-place only on NixOS hosts.
+    # On non-NixOS CI runners (e.g. Ubuntu), forcing a NixOS interpreter can
+    # corrupt tool execution and cause crashes during CMake compiler checks.
+    IS_NIXOS=0
+    if [ -f /etc/NIXOS ]; then
+      IS_NIXOS=1
+    elif [ -f /etc/os-release ] && grep -q '^ID=nixos$' /etc/os-release; then
+      IS_NIXOS=1
+    fi
+
+    if [ "$IS_NIXOS" -eq 1 ] && [ -d "$COMPILER_ROOT" ] && [ ! -f "$COMPILER_ROOT/.nixos-patched" ]; then
       echo "🔧 Patching cross-compiler for NixOS compatibility..."
 
-      # Get the NixOS dynamic linker path
-      NIX_LD=$(cat $NIX_CC/nix-support/dynamic-linker 2>/dev/null || echo "/nix/store/*-glibc-*/lib/ld-linux-x86-64.so.2")
+      # Get the NixOS dynamic linker path.
+      NIX_LD=$(cat "$NIX_CC/nix-support/dynamic-linker" 2>/dev/null || echo "/nix/store/*-glibc-*/lib/ld-linux-x86-64.so.2")
 
-      # If wildcard, resolve it
+      # If wildcard, resolve it.
       if [[ "$NIX_LD" == *"*"* ]]; then
         NIX_LD=$(ls /nix/store/*-glibc-*/lib/ld-linux-x86-64.so.2 2>/dev/null | head -1)
       fi
@@ -128,15 +137,15 @@
       if [ -n "$NIX_LD" ] && [ -f "$NIX_LD" ]; then
         echo "   Using linker: $NIX_LD"
 
-        # Find and patch ALL ELF executables in the entire compiler directory tree
-        find "$COMPILER_ROOT" -type f -executable | while read binary; do
-          if file "$binary" | grep -q "ELF.*executable"; then
+        # Find and patch ALL ELF executables in the compiler directory tree.
+        find "$COMPILER_ROOT" -type f -executable | while read -r binary; do
+          if file "$binary" | grep -q 'ELF.*executable'; then
             echo "   Patching: $binary"
             patchelf --set-interpreter "$NIX_LD" "$binary" 2>/dev/null || true
           fi
         done
 
-        # Mark as patched
+        # Mark as patched.
         touch "$COMPILER_ROOT/.nixos-patched"
         echo "✅ Cross-compiler patched successfully!"
       else
