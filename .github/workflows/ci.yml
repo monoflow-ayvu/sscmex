@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+env:
+  MIX_ENV: prod
+  MIX_TARGET: nerves_system_sg2002
+  ELIXIR_MAKE_CACHE_DIR: cache
+  SG200X_FHS: "1"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up BEAM toolchain
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28.3"
+          elixir-version: "1.18.4"
+
+      - name: Install system build tools
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            make \
+            pkg-config \
+            ninja-build \
+            python3 \
+            curl \
+            git \
+            unzip \
+            wget \
+            file \
+            ca-certificates
+
+      - name: Restore Mix cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+            cache
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-
+
+      - name: Install Hex and Rebar
+        shell: bash
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+
+      - name: Restore SG2002 SDK cache
+        uses: actions/cache@v4
+        with:
+          path: .devenv/state/sg200x-sdk
+          key: ${{ runner.os }}-sg200x-sdk-reCameraOS-0.2.0
+
+      - name: Install SG2002 SDK and host-tools
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RECAMERA_ROOT="$GITHUB_WORKSPACE/.devenv/state/sg200x-sdk"
+          SDK_DIR="$RECAMERA_ROOT/sg2002_recamera_emmc"
+          SDK_TARBALL="$RECAMERA_ROOT/reCameraOS_sdk_v0.2.0.tar.gz"
+          HOST_TOOLS_DIR="$RECAMERA_ROOT/host-tools"
+
+          mkdir -p "$RECAMERA_ROOT"
+
+          if [ ! -d "$SDK_DIR" ]; then
+            if [ ! -f "$SDK_TARBALL" ]; then
+              wget -O "$SDK_TARBALL" \
+                "https://github.com/Seeed-Studio/reCamera-OS/releases/download/0.2.0/reCameraOS_sdk_v0.2.0.tar.gz"
+            fi
+            tar -xzf "$SDK_TARBALL" -C "$RECAMERA_ROOT" --strip-components=0
+          fi
+
+          while IFS= read -r broken_link; do
+            rm -f "$broken_link"
+          done < <(find "$RECAMERA_ROOT" -type l ! -exec test -e {} \; -print)
+
+          if [ ! -d "$HOST_TOOLS_DIR/.git" ]; then
+            rm -rf "$HOST_TOOLS_DIR"
+            git clone --depth 1 https://github.com/sophgo/host-tools.git "$HOST_TOOLS_DIR"
+          fi
+
+          COMPILER_DIR="$HOST_TOOLS_DIR/gcc/riscv64-linux-musl-x86_64/bin"
+
+          for tool in gcc g++ objcopy objdump ar as ld nm ranlib strip; do
+            if [ -f "$COMPILER_DIR/riscv64-linux-musl-$tool" ] && [ ! -f "$COMPILER_DIR/riscv64-unknown-linux-musl-$tool" ]; then
+              ln -sf "riscv64-linux-musl-$tool" "$COMPILER_DIR/riscv64-unknown-linux-musl-$tool"
+            fi
+          done
+
+          {
+            echo "SG200X_SDK_PATH=$SDK_DIR"
+            echo "CMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/cmake/toolchain-riscv64-linux-musl-x86_64.cmake"
+          } >> "$GITHUB_ENV"
+
+          echo "$COMPILER_DIR" >> "$GITHUB_PATH"
+
+      - name: Toolchain preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          command -v riscv64-unknown-linux-musl-gcc
+          command -v riscv64-unknown-linux-musl-g++
+          file "$(command -v riscv64-unknown-linux-musl-gcc)"
+          riscv64-unknown-linux-musl-gcc --version
+          riscv64-unknown-linux-musl-g++ --version
+          printf 'int main(void){return 0;}\n' | riscv64-unknown-linux-musl-gcc -x c - -c -o /tmp/sscmex_toolchain_smoke.o
+
+      - name: Fetch dependencies
+        run: MIX_ENV=prod mix deps.get
+
+      - name: Compile Elixir
+        run: MIX_ENV=prod mix compile
+
+      - name: Build precompiled NIF (riscv64)
+        env:
+          TARGET_ARCH: riscv64
+          TARGET_OS: buildroot
+          TARGET_ABI: linux-musl
+        run: MIX_ENV=prod mix elixir_make.precompile
+
+      - name: Verify build artifacts
+        shell: bash
+        run: |
+          ls -la cache/
+          ls -lh cache/*.tar.gz

@@ -90,6 +90,12 @@ jobs:
           mix local.hex --force
           mix local.rebar --force
 
+      - name: Restore SG2002 SDK cache
+        uses: actions/cache@v4
+        with:
+          path: .devenv/state/sg200x-sdk
+          key: ${{ runner.os }}-sg200x-sdk-reCameraOS-0.2.0
+
       - name: Install SG2002 SDK and host-tools
         shell: bash
         run: |
