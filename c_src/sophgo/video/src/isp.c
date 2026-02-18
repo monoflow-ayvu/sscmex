@@ -9,6 +9,14 @@
 
 #include "app_ipcam_paramparse.h"
 
+#ifndef APP_IPCAM_RT_SCHED_ENABLE
+#define APP_IPCAM_RT_SCHED_ENABLE 0
+#endif
+
+#ifndef APP_IPCAM_RT_SCHED_PRIORITY
+#define APP_IPCAM_RT_SCHED_PRIORITY 80
+#endif
+
 /**************************************************************************
  *                              M A C R O S                               *
  **************************************************************************/
@@ -506,7 +514,6 @@ static void *ISP_Thread(void *arg)
 int app_ipcam_Vi_Isp_Start(void)
 {
     CVI_S32 s32Ret;
-    struct sched_param param;
     pthread_attr_t attr;
 
     VI_PIPE ViPipe;
@@ -517,11 +524,15 @@ int app_ipcam_Vi_Isp_Start(void)
         APP_PARAM_CHN_CFG_T *pstChnCfg = &g_pstViCtx->astChnInfo[i];
         ViPipe = pstChnCfg->s32ChnId;
 
-        param.sched_priority = 80;
         pthread_attr_init(&attr);
+#if APP_IPCAM_RT_SCHED_ENABLE
+        // NIF context runs inside BEAM process; use RT scheduling only when explicitly enabled.
+        struct sched_param param;
+        param.sched_priority = APP_IPCAM_RT_SCHED_PRIORITY;
         pthread_attr_setschedpolicy(&attr, SCHED_RR);
         pthread_attr_setschedparam(&attr, &param);
         pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
+#endif
         s32Ret = pthread_create(&g_IspPid[ViPipe], &attr, ISP_Thread, (void *)&pstSnsCfg->s32SnsId);
         APP_IPCAM_CHECK_RET(s32Ret, "create isp running thread(%d) fail\n", ViPipe);
     }

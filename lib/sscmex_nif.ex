@@ -1,6 +1,6 @@
 defmodule SSCMEx.Nif do
   @moduledoc false
-  # @on_load :load_nif
+  @on_load :load_nif
 
   require Logger
 
@@ -18,6 +18,7 @@ defmodule SSCMEx.Nif do
         case :erlang.system_info(:system_architecture) do
           ~c"riscv64-buildroot-linux-musl" ->
             raise "SSCMEx load_nif: #{inspect(err)}"
+
           _ ->
             Logger.error("SSCMEx: System not supported")
             :ok
@@ -51,6 +52,7 @@ defmodule SSCMEx.Nif do
   def model_get_output_type(_model_resource), do: :erlang.nif_error(:nif_not_loaded)
   def model_run(_model_resource, _image_struct), do: :erlang.nif_error(:nif_not_loaded)
   def model_set_config(_model_resource, _option, _value), do: :erlang.nif_error(:nif_not_loaded)
+  def model_get_config(_model_resource, _option), do: :erlang.nif_error(:nif_not_loaded)
   def model_get_perf(_model_resource), do: :erlang.nif_error(:nif_not_loaded)
 
   # Device resource functions
@@ -72,5 +74,6 @@ defmodule SSCMEx.Nif do
   def camera_is_streaming(_camera_resource), do: :erlang.nif_error(:nif_not_loaded)
   def camera_retrieve_frame(_camera_resource, _format), do: :erlang.nif_error(:nif_not_loaded)
   def camera_set_ctrl(_camera_resource, _ctrl, _value), do: :erlang.nif_error(:nif_not_loaded)
+  def camera_get_ctrl(_camera_resource, _ctrl), do: :erlang.nif_error(:nif_not_loaded)
   def camera_get_id(_camera_resource), do: :erlang.nif_error(:nif_not_loaded)
 end

@@ -45,7 +45,16 @@ defmodule SSCMEx.Model do
 
   defstruct [:resource]
 
-  @type model_type :: :fomo | :yolov5 | :yolov8 | :yolo11 | :classifier | :yolov8_pose | :yolo11_pose | :yolo11_seg | :unknown
+  @type model_type ::
+          :fomo
+          | :yolov5
+          | :yolov8
+          | :yolo11
+          | :classifier
+          | :yolov8_pose
+          | :yolo11_pose
+          | :yolo11_seg
+          | :unknown
   @type input_type :: :image | :audio | :text | :unknown
   @type output_type :: :boxes | :classes | :keypoints | :segments | :unknown
   @type config_option :: :threshold_score | :threshold_nms
@@ -198,6 +207,23 @@ defmodule SSCMEx.Model do
       {:ok, _} -> :ok
       error -> error
     end
+  end
+
+  @doc """
+  Get a model configuration option.
+
+  ## Options
+
+  - `:threshold_score` - Minimum confidence score threshold
+  - `:threshold_nms` - Non-maximum suppression threshold
+
+  ## Examples
+
+      {:ok, threshold} = SSCMEx.Model.get_config(model, :threshold_score)
+  """
+  @spec get_config(t(), config_option()) :: {:ok, float()} | {:error, term()}
+  def get_config(%__MODULE__{resource: resource}, option) do
+    SSCMEx.Nif.model_get_config(resource, option)
   end
 
   @doc """

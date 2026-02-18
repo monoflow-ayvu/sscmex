@@ -2,6 +2,7 @@
 #include <string>
 #include <cstring>
 #include <forward_list>
+#include <limits>
 #include <vector>
 
 #include "nif_utils.hpp"
@@ -203,6 +204,10 @@ static ma_pixel_format_t atom_to_pixel_format(ErlNifEnv* env, ERL_NIF_TERM term)
     if (strcmp(atom, "rgb565") == 0) return MA_PIXEL_FORMAT_RGB565;
     if (strcmp(atom, "yuv422") == 0) return MA_PIXEL_FORMAT_YUV422;
     if (strcmp(atom, "gray") == 0) return MA_PIXEL_FORMAT_GRAYSCALE;
+    if (strcmp(atom, "jpeg") == 0) return MA_PIXEL_FORMAT_JPEG;
+    if (strcmp(atom, "h264") == 0) return MA_PIXEL_FORMAT_H264;
+    if (strcmp(atom, "h265") == 0) return MA_PIXEL_FORMAT_H265;
+    if (strcmp(atom, "rgb888_planar") == 0) return MA_PIXEL_FORMAT_RGB888_PLANAR;
     return MA_PIXEL_FORMAT_UNKNOWN;
 }
 
@@ -213,6 +218,10 @@ static ERL_NIF_TERM pixel_format_to_atom(ErlNifEnv* env, ma_pixel_format_t forma
         case MA_PIXEL_FORMAT_RGB565: return make_atom(env, "rgb565");
         case MA_PIXEL_FORMAT_YUV422: return make_atom(env, "yuv422");
         case MA_PIXEL_FORMAT_GRAYSCALE: return make_atom(env, "gray");
+        case MA_PIXEL_FORMAT_JPEG: return make_atom(env, "jpeg");
+        case MA_PIXEL_FORMAT_H264: return make_atom(env, "h264");
+        case MA_PIXEL_FORMAT_H265: return make_atom(env, "h265");
+        case MA_PIXEL_FORMAT_RGB888_PLANAR: return make_atom(env, "rgb888_planar");
         default:                     return make_atom(env, "unknown");
     }
 }
@@ -253,22 +262,96 @@ static ERL_NIF_TERM output_type_to_atom(ErlNifEnv* env, ma_output_type_t type) {
     }
 }
 
+static bool is_compressed_format(ma_pixel_format_t format) {
+    return format == MA_PIXEL_FORMAT_JPEG ||
+           format == MA_PIXEL_FORMAT_H264 ||
+           format == MA_PIXEL_FORMAT_H265;
+}
+
+static bool expected_raw_image_size(uint16_t width, uint16_t height, ma_pixel_format_t format, size_t* out_size) {
+    if (!out_size || width == 0 || height == 0) {
+        return false;
+    }
+
+    size_t bytes_per_pixel = 0;
+    switch (format) {
+        case MA_PIXEL_FORMAT_RGB888:
+        case MA_PIXEL_FORMAT_RGB888_PLANAR:
+            bytes_per_pixel = 3;
+            break;
+        case MA_PIXEL_FORMAT_RGB565:
+        case MA_PIXEL_FORMAT_YUV422:
+            bytes_per_pixel = 2;
+            break;
+        case MA_PIXEL_FORMAT_GRAYSCALE:
+            bytes_per_pixel = 1;
+            break;
+        default:
+            return false;
+    }
+
+    const size_t pixel_count = static_cast<size_t>(width) * static_cast<size_t>(height);
+    if (pixel_count > (std::numeric_limits<size_t>::max() / bytes_per_pixel)) {
+        return false;
+    }
+
+    *out_size = pixel_count * bytes_per_pixel;
+    return true;
+}
+
+static const char* validate_image_for_model_run(const ma_img_t& img, size_t binary_size) {
+    if (img.width == 0 || img.height == 0) {
+        return "image_dimensions_invalid";
+    }
+
+    if (img.data == nullptr) {
+        return "image_data_missing";
+    }
+
+    if (img.size == 0) {
+        return "image_size_invalid";
+    }
+
+    if (static_cast<size_t>(img.size) > binary_size) {
+        return "image_size_exceeds_binary";
+    }
+
+    if (is_compressed_format(img.format)) {
+        return "image_format_not_supported_for_inference";
+    }
+
+    size_t expected_size = 0;
+    if (!expected_raw_image_size(img.width, img.height, img.format, &expected_size)) {
+        return "image_format_not_supported";
+    }
+
+    if (expected_size != static_cast<size_t>(img.size)) {
+        return "image_size_mismatch";
+    }
+
+    return nullptr;
+}
+
 // Helper: parse SSCMEx.Image struct from Elixir (zero-copy)
 static bool get_image_struct(ErlNifEnv* env, ERL_NIF_TERM term, ma_img_t* img, ErlNifBinary* bin) {
-    if (!enif_is_map(env, term)) return false;
+    if (!img || !bin || !enif_is_map(env, term)) return false;
 
-    ERL_NIF_TERM width_term, height_term, format_term, data_term;
+    *img = ma_img_t{};
+
+    ERL_NIF_TERM width_term, height_term, format_term, data_term, size_term;
 
     // Get width
     if (!enif_get_map_value(env, term, make_atom(env, "width"), &width_term)) return false;
     int width_int;
     if (!enif_get_int(env, width_term, &width_int)) return false;
+    if (width_int <= 0 || width_int > static_cast<int>(std::numeric_limits<uint16_t>::max())) return false;
     img->width = (uint16_t)width_int;
 
     // Get height
     if (!enif_get_map_value(env, term, make_atom(env, "height"), &height_term)) return false;
     int height_int;
     if (!enif_get_int(env, height_term, &height_int)) return false;
+    if (height_int <= 0 || height_int > static_cast<int>(std::numeric_limits<uint16_t>::max())) return false;
     img->height = (uint16_t)height_int;
 
     // Get format
@@ -279,6 +362,30 @@ static bool get_image_struct(ErlNifEnv* env, ERL_NIF_TERM term, ma_img_t* img, E
     // Get data binary (zero-copy - just gets pointer to existing data)
     if (!enif_get_map_value(env, term, make_atom(env, "data"), &data_term)) return false;
     if (!enif_inspect_iolist_as_binary(env, data_term, bin)) return false;
+
+    size_t declared_size = bin->size;
+    if (enif_get_map_value(env, term, make_atom(env, "size"), &size_term)) {
+        ErlNifUInt64 size_u64;
+        if (!enif_get_uint64(env, size_term, &size_u64)) return false;
+        if (size_u64 > static_cast<ErlNifUInt64>(std::numeric_limits<size_t>::max())) return false;
+        declared_size = static_cast<size_t>(size_u64);
+    }
+
+    if (declared_size == 0 ||
+        declared_size > bin->size ||
+        declared_size > static_cast<size_t>(std::numeric_limits<uint32_t>::max())) {
+        return false;
+    }
+
+    size_t expected_size = 0;
+    if (expected_raw_image_size(img->width, img->height, img->format, &expected_size)) {
+        if (expected_size > static_cast<size_t>(std::numeric_limits<uint32_t>::max())) return false;
+        if (declared_size != expected_size || bin->size != expected_size) return false;
+    } else if (is_compressed_format(img->format)) {
+        if (declared_size == 0 || declared_size > bin->size) return false;
+    }
+
+    img->size = static_cast<uint32_t>(declared_size);
     img->data = bin->data;
 
     // Set defaults for other fields
@@ -639,7 +746,16 @@ static ERL_NIF_TERM model_run(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[
     ma_img_t img;
     ErlNifBinary bin;
     if (!get_image_struct(env, argv[1], &img, &bin)) {
-        return make_error(env, "invalid_image");
+        return make_error(env, "invalid_image_struct");
+    }
+
+    if (const char* image_error = validate_image_for_model_run(img, bin.size)) {
+        return make_error(env, image_error);
+    }
+
+    const ma_output_type_t output_type = res->val->model->getOutputType();
+    if (output_type != MA_OUTPUT_TYPE_BBOX && output_type != MA_OUTPUT_TYPE_TENSOR) {
+        return make_error(env, "unsupported_model_type_for_run");
     }
 
     // Cast to Detector and run (we only support detectors for now)
@@ -661,6 +777,20 @@ static ERL_NIF_TERM model_run(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[
     return make_ok(env, list);
 }
 
+static bool parse_model_config_opt(const char* opt, ma_model_cfg_opt_t* cfg_opt) {
+    if (!opt || !cfg_opt) return false;
+
+    if (strcmp(opt, "threshold_score") == 0) {
+        *cfg_opt = MA_MODEL_CFG_OPT_THRESHOLD;
+        return true;
+    }
+    if (strcmp(opt, "threshold_nms") == 0) {
+        *cfg_opt = MA_MODEL_CFG_OPT_NMS;
+        return true;
+    }
+    return false;
+}
+
 // NIF: Set model config
 static ERL_NIF_TERM model_set_config(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     auto* res = NifRes<ModelRes>::get(env, argv[0]);
@@ -678,21 +808,35 @@ static ERL_NIF_TERM model_set_config(ErlNifEnv* env, int argc, const ERL_NIF_TER
         return make_error(env, "invalid_value");
     }
 
-    // Cast to Detector for setConfig
-    Detector* detector = static_cast<Detector*>(res->val->model);
-
-    // Map option string to config
     ma_model_cfg_opt_t cfg_opt;
-    if (strcmp(opt, "threshold_score") == 0) {
-        cfg_opt = MA_MODEL_CFG_OPT_THRESHOLD;
-    } else if (strcmp(opt, "threshold_nms") == 0) {
-        cfg_opt = MA_MODEL_CFG_OPT_NMS;
-    } else {
+    if (!parse_model_config_opt(opt, &cfg_opt)) {
         return make_error(env, "unknown_option");
     }
 
-    ma_err_t err = detector->setConfig(cfg_opt, (float)value);
+    ma_err_t err = res->val->model->setConfig(cfg_opt, value);
     return err == MA_OK ? make_ok(env, make_atom(env, "ok"))
+                        : make_error(env, "config_failed");
+}
+
+// NIF: Get model config
+static ERL_NIF_TERM model_get_config(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    auto* res = NifRes<ModelRes>::get(env, argv[0]);
+    if (!res || !res->val || !res->val->model) return make_error(env, "invalid_resource");
+
+    // Get config option atom
+    char opt[64];
+    if (!enif_get_atom(env, argv[1], opt, sizeof(opt), ERL_NIF_LATIN1)) {
+        return make_error(env, "invalid_option");
+    }
+
+    ma_model_cfg_opt_t cfg_opt;
+    if (!parse_model_config_opt(opt, &cfg_opt)) {
+        return make_error(env, "unknown_option");
+    }
+
+    double value = 0.0;
+    ma_err_t err = res->val->model->getConfig(cfg_opt, &value);
+    return err == MA_OK ? make_ok(env, enif_make_double(env, value))
                         : make_error(env, "config_failed");
 }
 
@@ -1009,22 +1153,31 @@ static ERL_NIF_TERM camera_retrieve_frame(ErlNifEnv* env, int argc, const ERL_NI
 }
 
 // NIF: Set camera control
+static bool parse_camera_ctrl_type(ErlNifEnv* env, ERL_NIF_TERM term, Camera::CtrlType* ctrl) {
+    if (!ctrl) return false;
+
+    char ctrl_atom[32];
+    if (!enif_get_atom(env, term, ctrl_atom, sizeof(ctrl_atom), ERL_NIF_LATIN1)) {
+        return false;
+    }
+
+    if (strcmp(ctrl_atom, "window") == 0) *ctrl = Camera::CtrlType::kWindow;
+    else if (strcmp(ctrl_atom, "channel") == 0) *ctrl = Camera::CtrlType::kChannel;
+    else if (strcmp(ctrl_atom, "format") == 0) *ctrl = Camera::CtrlType::kFormat;
+    else if (strcmp(ctrl_atom, "fps") == 0) *ctrl = Camera::CtrlType::kFps;
+    else return false;
+
+    return true;
+}
+
 static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     auto* res = NifRes<CameraRes>::get(env, argv[0]);
     if (!res || !res->val || !res->val->camera) return make_error(env, "invalid_resource");
 
-    // Get control type atom
-    char ctrl_atom[32];
-    if (!enif_get_atom(env, argv[1], ctrl_atom, sizeof(ctrl_atom), ERL_NIF_LATIN1)) {
-        return make_error(env, "invalid_ctrl");
-    }
-
     Camera::CtrlType ctrl;
-    if (strcmp(ctrl_atom, "window") == 0) ctrl = Camera::CtrlType::kWindow;
-    else if (strcmp(ctrl_atom, "channel") == 0) ctrl = Camera::CtrlType::kChannel;
-    else if (strcmp(ctrl_atom, "format") == 0) ctrl = Camera::CtrlType::kFormat;
-    else if (strcmp(ctrl_atom, "fps") == 0) ctrl = Camera::CtrlType::kFps;
-    else return make_error(env, "unsupported_ctrl");
+    if (!parse_camera_ctrl_type(env, argv[1], &ctrl)) {
+        return make_error(env, "unsupported_ctrl");
+    }
 
     // Get value - could be int or tuple of two ints (for window)
     Camera::CtrlValue value;
@@ -1041,6 +1194,19 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         }
         value.u16s[0] = (uint16_t)w;
         value.u16s[1] = (uint16_t)h;
+    } else if (ctrl == Camera::CtrlType::kFormat) {
+        // Pixel format can be provided as atom (:rgb888/:jpeg/:h264/...) or raw enum integer.
+        if (enif_is_atom(env, argv[2])) {
+            ma_pixel_format_t format = atom_to_pixel_format(env, argv[2]);
+            if (format == MA_PIXEL_FORMAT_UNKNOWN) {
+                return make_error(env, "invalid_format_value");
+            }
+            value.i32 = static_cast<int32_t>(format);
+        } else {
+            if (!enif_get_int(env, argv[2], &value.i32)) {
+                return make_error(env, "invalid_value");
+            }
+        }
     } else {
         // Single int value
         if (!enif_get_int(env, argv[2], &value.i32)) {
@@ -1051,6 +1217,33 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
     ma_err_t err = res->val->camera->commandCtrl(ctrl, Camera::CtrlMode::kWrite, value);
     return err == MA_OK ? make_ok(env, make_atom(env, "ok"))
                         : make_error(env, "set_ctrl_failed");
+}
+
+// NIF: Get camera control
+static ERL_NIF_TERM camera_get_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    auto* res = NifRes<CameraRes>::get(env, argv[0]);
+    if (!res || !res->val || !res->val->camera) return make_error(env, "invalid_resource");
+
+    Camera::CtrlType ctrl;
+    if (!parse_camera_ctrl_type(env, argv[1], &ctrl)) {
+        return make_error(env, "unsupported_ctrl");
+    }
+
+    Camera::CtrlValue value{};
+    ma_err_t err = res->val->camera->commandCtrl(ctrl, Camera::CtrlMode::kRead, value);
+    if (err != MA_OK) return make_error(env, "get_ctrl_failed");
+
+    switch (ctrl) {
+        case Camera::CtrlType::kWindow:
+            return make_ok(env, enif_make_tuple2(env, enif_make_int(env, value.u16s[0]), enif_make_int(env, value.u16s[1])));
+        case Camera::CtrlType::kChannel:
+        case Camera::CtrlType::kFps:
+            return make_ok(env, enif_make_int(env, value.i32));
+        case Camera::CtrlType::kFormat:
+            return make_ok(env, pixel_format_to_atom(env, static_cast<ma_pixel_format_t>(value.i32)));
+        default:
+            return make_error(env, "unsupported_ctrl");
+    }
 }
 
 // NIF: Get camera ID
@@ -1089,6 +1282,7 @@ static ErlNifFunc nif_functions[] = {
     {"model_get_output_type", 1, model_get_output_type, 0},
     {"model_run", 2, model_run, ERL_NIF_DIRTY_JOB_CPU_BOUND},
     {"model_set_config", 3, model_set_config, 0},
+    {"model_get_config", 2, model_get_config, 0},
     {"model_get_perf", 1, model_get_perf, 0},
 
     // Device functions
@@ -1110,6 +1304,7 @@ static ErlNifFunc nif_functions[] = {
     {"camera_is_streaming", 1, camera_is_streaming, 0},
     {"camera_retrieve_frame", 2, camera_retrieve_frame, ERL_NIF_DIRTY_JOB_IO_BOUND},
     {"camera_set_ctrl", 3, camera_set_ctrl, 0},
+    {"camera_get_ctrl", 2, camera_get_ctrl, 0},
     {"camera_get_id", 1, camera_get_id, 0},
 };
 

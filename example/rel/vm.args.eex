@@ -20,10 +20,9 @@
 # OS system time.
 +C multi_time_warp
 
-## Choose whether to load all code at system startup
+## Load code at system startup
 ## See https://www.erlang.org/doc/system/system_principles.html#code-loading-strategy
-## Slow devices sometimes benefit from choosing embedded mode
-##-mode interactive
+-mode embedded
 
 # Load code as per the boot script since not using archives
 # See https://www.erlang.org/doc/man/init.html#command-line-flags
@@ -40,7 +39,7 @@
 -kernel shell_history enabled
 
 ## Enable heartbeat monitoring of the Erlang runtime system
--heart -env HEART_BEAT_TIMEOUT 30
+-heart -env HEART_BEAT_TIMEOUT 120 -env HEART_INIT_GRACE_TIME 120
 
 ## Start the Elixir shell
 

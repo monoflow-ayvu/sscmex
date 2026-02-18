@@ -175,22 +175,23 @@ ma_err_t CameraSG200X::init(size_t preset_idx) noexcept {
     const uint16_t w = _presets[preset_idx].width;
     const uint16_t h = _presets[preset_idx].height;
     const int fps    = _presets[preset_idx].fps;
+    m_preset_idx     = preset_idx;
 
-    // Channel 0: RAW (RGB888) for retrieve_frame(camera, :rgb888). Match sscma-elixir: two channels.
+    // Channel 0: RAW (RGB888), disabled until explicitly selected.
     m_channels[CHN_RAW].width      = w;
     m_channels[CHN_RAW].height     = h;
     m_channels[CHN_RAW].fps        = fps;
     m_channels[CHN_RAW].format     = MA_PIXEL_FORMAT_RGB888;
     m_channels[CHN_RAW].configured = true;
-    m_channels[CHN_RAW].enabled    = true;
+    m_channels[CHN_RAW].enabled    = false;
 
-    // Channel 1: JPEG (same res). Same hardware as sscma-elixir; pipeline works with RAW+JPEG enabled.
+    // Channel 1: JPEG is configured but disabled by default to reduce VB/ION pressure.
     m_channels[CHN_JPEG].width      = w;
     m_channels[CHN_JPEG].height     = h;
     m_channels[CHN_JPEG].fps        = fps;
     m_channels[CHN_JPEG].format     = MA_PIXEL_FORMAT_JPEG;
     m_channels[CHN_JPEG].configured = true;
-    m_channels[CHN_JPEG].enabled    = true;
+    m_channels[CHN_JPEG].enabled    = false;
 
     // Channel 2: H264 disabled unless needed.
     m_channels[CHN_H264].width      = w;
@@ -216,6 +217,26 @@ void CameraSG200X::deInit() noexcept {
     m_initialized = false;
 }
 
+void CameraSG200X::clearChannelQueue(channel& ch) noexcept {
+    if (ch.queue == nullptr) {
+        return;
+    }
+
+    ma_img_t* queued = nullptr;
+    while (ch.queue->fetch(reinterpret_cast<void**>(&queued), 0)) {
+        if (queued != nullptr) {
+            if (!queued->physical) {
+                delete[] queued->data;
+            }
+            delete queued;
+            queued = nullptr;
+        }
+    }
+
+    delete ch.queue;
+    ch.queue = nullptr;
+}
+
 ma_err_t CameraSG200X::startStream(StreamMode mode) noexcept {
     if (!m_initialized) [[unlikely]] {
         return MA_EINVAL;
@@ -224,6 +245,19 @@ ma_err_t CameraSG200X::startStream(StreamMode mode) noexcept {
         return MA_OK;
     }
     MA_LOGD(TAG, "CameraSG200X::startStream: %zu", m_id);
+
+    bool any_enabled = false;
+    for (int i = 0; i < CHN_MAX; i++) {
+        if (m_channels[i].enabled) {
+            any_enabled = true;
+            break;
+        }
+    }
+    // Backward compatible default: if caller didn't select channels, stream RAW channel only.
+    if (!any_enabled) {
+        m_channels[CHN_RAW].enabled = true;
+    }
+
     for (int i = 0; i < CHN_MAX; i++) {
         if (m_channels[i].enabled && !m_channels[i].configured) {
             MA_LOGW(TAG, "Channel %d is not configured", i);
@@ -261,7 +295,7 @@ ma_err_t CameraSG200X::startStream(StreamMode mode) noexcept {
             setupVideo(static_cast<video_ch_index_t>(i), &param);
 
             if (m_channels[i].queue != nullptr) {
-                delete m_channels[i].queue;
+                clearChannelQueue(m_channels[i]);
             }
             // m_channels[i].queue = new MessageBox(param.fps);
             m_channels[i].queue = new MessageBox(1);
@@ -288,6 +322,9 @@ void CameraSG200X::stopStream() noexcept {
     MA_LOGD(TAG, "CameraSG200X::stopStream: %zu", m_id);
     m_streaming = false;
     CAMERA_DEINIT();
+    for (int i = 0; i < CHN_MAX; i++) {
+        clearChannelQueue(m_channels[i]);
+    }
 }
 
 
@@ -353,6 +390,7 @@ ma_err_t CameraSG200X::retrieveFrame(ma_img_t& frame, ma_pixel_format_t format) 
             chn = 1;
             break;
         case MA_PIXEL_FORMAT_H264:
+        case MA_PIXEL_FORMAT_H265:
             chn = 2;
             break;
         default:

@@ -9,6 +9,14 @@
 
 #include "app_ipcam_paramparse.h"
 
+#ifndef APP_IPCAM_RT_SCHED_ENABLE
+#define APP_IPCAM_RT_SCHED_ENABLE 0
+#endif
+
+#ifndef APP_IPCAM_RT_SCHED_PRIORITY
+#define APP_IPCAM_RT_SCHED_PRIORITY 80
+#endif
+
 #define P_MAX_SIZE (2048 * 1024) //P oversize 512K lost it
 /**************************************************************************
  *                              M A C R O S                               *
@@ -1204,11 +1212,14 @@ int app_ipcam_Venc_Start(APP_VENC_CHN_E VencIdx)
         pthread_attr_init(&pthread_attr);
 
         pfp_task_entry fun_entry = NULL;
+#if APP_IPCAM_RT_SCHED_ENABLE
+        // NIF context runs inside BEAM process; use RT scheduling only when explicitly enabled.
         struct sched_param param;
-        param.sched_priority = 80;
+        param.sched_priority = APP_IPCAM_RT_SCHED_PRIORITY;
         pthread_attr_setschedpolicy(&pthread_attr, SCHED_RR);
         pthread_attr_setschedparam(&pthread_attr, &param);
         pthread_attr_setinheritsched(&pthread_attr, PTHREAD_EXPLICIT_SCHED);
+#endif
         fun_entry = Thread_Streaming_Proc;
 
         g_Venc_pthread[VencChn] = 0;

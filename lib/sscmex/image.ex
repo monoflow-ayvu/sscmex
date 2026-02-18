@@ -1,17 +1,23 @@
 defmodule SSCMEx.Image do
   @moduledoc """
-  Image structure for model inference.
+  Image structure used by camera capture and model inference.
 
-  This is a zero-copy implementation - the `data` field holds a reference
-  to the existing binary, not a copy. Elixir binaries are reference-counted
-  and immutable, so no data is copied when creating or passing images.
+  This is a zero-copy wrapper over an Elixir binary. The `data` field holds a
+  reference to the original binary.
 
   ## Supported Formats
 
-  - `:rgb888` - 24-bit RGB (3 bytes per pixel)
-  - `:rgb565` - 16-bit RGB (2 bytes per pixel)
-  - `:yuv422` - YUV 4:2:2 (2 bytes per pixel)
-  - `:gray` - 8-bit grayscale (1 byte per pixel)
+  Raw (fixed bytes-per-pixel):
+  - `:rgb888`
+  - `:rgb888_planar`
+  - `:rgb565`
+  - `:yuv422`
+  - `:gray`
+
+  Encoded (variable size):
+  - `:jpeg`
+  - `:h264`
+  - `:h265`
 
   ## Example
 
@@ -23,16 +29,21 @@ defmodule SSCMEx.Image do
       {:ok, results} = SSCMEx.Model.run(model, image)
   """
 
-  @type format :: :rgb888 | :rgb565 | :yuv422 | :gray
+  @type raw_format :: :rgb888 | :rgb888_planar | :rgb565 | :yuv422 | :gray
+  @type encoded_format :: :jpeg | :h264 | :h265
+  @type format :: raw_format() | encoded_format()
 
   @type t :: %__MODULE__{
           width: non_neg_integer(),
           height: non_neg_integer(),
           format: format(),
-          data: binary()
+          data: binary(),
+          size: non_neg_integer() | nil,
+          timestamp: integer() | nil,
+          key: boolean() | nil
         }
 
-  defstruct [:width, :height, :format, :data]
+  defstruct [:width, :height, :format, :data, :size, :timestamp, :key]
 
   @doc """
   Create a new image struct.
@@ -43,7 +54,7 @@ defmodule SSCMEx.Image do
 
   - `width` - Image width in pixels
   - `height` - Image height in pixels
-  - `format` - Pixel format (`:rgb888`, `:rgb565`, `:yuv422`, or `:gray`)
+  - `format` - Pixel format
   - `data` - Binary image data (not copied)
 
   ## Example
@@ -52,7 +63,15 @@ defmodule SSCMEx.Image do
   """
   @spec new(non_neg_integer(), non_neg_integer(), format(), binary()) :: t()
   def new(width, height, format, data) do
-    %__MODULE__{width: width, height: height, format: format, data: data}
+    %__MODULE__{
+      width: width,
+      height: height,
+      format: format,
+      data: data,
+      size: byte_size(data),
+      timestamp: nil,
+      key: nil
+    }
   end
 
   @doc """
@@ -64,8 +83,12 @@ defmodule SSCMEx.Image do
       921600
   """
   @spec data_size(t()) :: non_neg_integer()
-  def data_size(%__MODULE__{width: w, height: h, format: format}) do
-    bytes_per_pixel(format) * w * h
+  def data_size(%__MODULE__{width: w, height: h, format: format, data: data}) do
+    case bytes_per_pixel(format) do
+      {:ok, bpp} -> bpp * w * h
+      :encoded -> byte_size(data)
+      :unsupported -> 0
+    end
   end
 
   @doc """
@@ -78,14 +101,23 @@ defmodule SSCMEx.Image do
       true
   """
   @spec valid?(t()) :: boolean()
-  def valid?(%__MODULE__{data: data} = image) do
-    Kernel.byte_size(data) == data_size(image)
+  def valid?(%__MODULE__{width: w, height: h, format: format, data: data}) do
+    case bytes_per_pixel(format) do
+      {:ok, bpp} -> byte_size(data) == bpp * w * h
+      :encoded -> byte_size(data) > 0
+      :unsupported -> false
+    end
   end
 
-  # Returns bytes per pixel for each format
-  @spec bytes_per_pixel(format()) :: non_neg_integer()
-  defp bytes_per_pixel(:rgb888), do: 3
-  defp bytes_per_pixel(:rgb565), do: 2
-  defp bytes_per_pixel(:yuv422), do: 2
-  defp bytes_per_pixel(:gray), do: 1
+  # Returns bytes per pixel for raw formats, :encoded for compressed formats.
+  @spec bytes_per_pixel(format()) :: {:ok, non_neg_integer()} | :encoded | :unsupported
+  defp bytes_per_pixel(:rgb888), do: {:ok, 3}
+  defp bytes_per_pixel(:rgb888_planar), do: {:ok, 3}
+  defp bytes_per_pixel(:rgb565), do: {:ok, 2}
+  defp bytes_per_pixel(:yuv422), do: {:ok, 2}
+  defp bytes_per_pixel(:gray), do: {:ok, 1}
+  defp bytes_per_pixel(:jpeg), do: :encoded
+  defp bytes_per_pixel(:h264), do: :encoded
+  defp bytes_per_pixel(:h265), do: :encoded
+  defp bytes_per_pixel(_), do: :unsupported
 end

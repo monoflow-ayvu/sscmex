@@ -7,10 +7,12 @@ defmodule SSCMEx.Camera do
 
   ## Camera and TPU together
 
-  Camera and TPU share ION carveout memory. If you use both (e.g. capture frames
-  then run inference), and see `retrieve_frame_failed` with dmesg "ion allocated
-  failed" or "sys_ion_alloc fail", try starting the camera (init + start_stream)
-  before loading the engine/model so video buffer pools get memory first.
+  Camera and TPU share ION carveout memory. If you use both and see
+  `retrieve_frame_failed` with dmesg "ion allocated failed" or "sys_ion_alloc fail":
+  use a lower-resolution preset (for example index 3: 1280x720 @ 30fps), then choose
+  the flow that matches your use-case:
+  - streaming inference: start camera first, then load engine/model
+  - one-shot capture: capture one frame, stop/deinit camera, then load engine/model
 
   ## Example
 
@@ -22,7 +24,7 @@ defmodule SSCMEx.Camera do
 
         # Initialize with preset (resolution/fps)
         {:ok, presets} = SSCMEx.Camera.get_presets(camera)
-        {:ok, :initialized} = SSCMEx.Camera.init(camera, 0)
+        {:ok, :initialized} = SSCMEx.Camera.init(camera, 3)
 
         # Start streaming
         {:ok, :streaming} = SSCMEx.Camera.start_stream(camera, :refresh_on_return)
@@ -32,6 +34,7 @@ defmodule SSCMEx.Camera do
 
         # Stop streaming
         {:ok, :stopped} = SSCMEx.Camera.stop_stream(camera)
+        {:ok, :deinitialized} = SSCMEx.Camera.deinit(camera)
       end
   """
 
@@ -44,23 +47,18 @@ defmodule SSCMEx.Camera do
           description: String.t()
         }
 
-  @type frame :: %{
-          width: non_neg_integer(),
-          height: non_neg_integer(),
-          format: atom(),
-          size: non_neg_integer(),
-          data: binary(),
-          timestamp: integer(),
-          key: boolean()
-        }
+  @type frame :: SSCMEx.Image.t()
 
   @type stream_mode :: :refresh_on_return | :refresh_on_retrieve
   @type pixel_format ::
           :rgb888
+          | :rgb565
           | :yuv422
+          | :gray
           | :jpeg
           | :h264
           | :h265
+          | :rgb888_planar
 
   @type ctrl_type :: :window | :channel | :format | :fps
 
@@ -162,8 +160,8 @@ defmodule SSCMEx.Camera do
   @spec is_initialized(t()) :: {:ok, boolean()} | {:error, term()}
   def is_initialized(%__MODULE__{resource: resource}) do
     case SSCMEx.Nif.camera_is_initialized(resource) do
-      {:ok, :true} -> {:ok, true}
-      {:ok, :false} -> {:ok, false}
+      {:ok, true} -> {:ok, true}
+      {:ok, false} -> {:ok, false}
       error -> error
     end
   end
@@ -206,8 +204,8 @@ defmodule SSCMEx.Camera do
   @spec is_streaming(t()) :: {:ok, boolean()} | {:error, term()}
   def is_streaming(%__MODULE__{resource: resource}) do
     case SSCMEx.Nif.camera_is_streaming(resource) do
-      {:ok, :true} -> {:ok, true}
-      {:ok, :false} -> {:ok, false}
+      {:ok, true} -> {:ok, true}
+      {:ok, false} -> {:ok, false}
       error -> error
     end
   end
@@ -222,24 +220,42 @@ defmodule SSCMEx.Camera do
   - `:h264` - H.264 encoded video frame
   - `:h265` - H.265 encoded video frame
 
+  ## Channel selection
+  The native camera backend maps requested format to a channel:
+  - raw formats (`:rgb888`, `:rgb565`, `:yuv422`, `:gray`, `:rgb888_planar`) -> channel `0`
+  - `:jpeg` -> channel `1`
+  - `:h264` / `:h265` -> channel `2`
+
   ## Returns
-  A frame map containing:
-  - `:width` - Frame width in pixels
-  - `:height` - Frame height in pixels
-  - `:format` - Pixel format atom
-  - `:size` - Data size in bytes
-  - `:data` - Binary frame data
-  - `:timestamp` - Capture timestamp
-  - `:key` - Whether this is a key frame (for video codecs)
+  Returns `%SSCMEx.Image{}`.
+
+  The image includes:
+  - `width`, `height`, `format`, `data`
+  - metadata fields when available from the camera pipeline (`size`, `timestamp`, `key`)
 
   ## Examples
 
-      {:ok, frame} = SSCMEx.Camera.retrieve_frame(camera, :rgb888)
-      # frame.data contains raw RGB888 pixels
+      {:ok, image} = SSCMEx.Camera.retrieve_frame(camera, :rgb888)
+      # image.data contains raw RGB888 pixels
   """
   @spec retrieve_frame(t(), pixel_format()) :: {:ok, frame()} | {:error, term()}
   def retrieve_frame(%__MODULE__{resource: resource}, format) do
-    SSCMEx.Nif.camera_retrieve_frame(resource, format)
+    case SSCMEx.Nif.camera_retrieve_frame(resource, format) do
+      {:ok, %{width: width, height: height, format: image_format, data: data} = frame_map} ->
+        {:ok,
+         %SSCMEx.Image{
+           width: width,
+           height: height,
+           format: image_format,
+           data: data,
+           size: Map.get(frame_map, :size, byte_size(data)),
+           timestamp: Map.get(frame_map, :timestamp),
+           key: Map.get(frame_map, :key)
+         }}
+
+      error ->
+        error
+    end
   end
 
   @doc """
@@ -258,10 +274,30 @@ defmodule SSCMEx.Camera do
 
       # Set FPS
       {:ok, :ok} = SSCMEx.Camera.set_ctrl(camera, :fps, 15)
+
+      # Set channel format using atom
+      {:ok, :ok} = SSCMEx.Camera.set_ctrl(camera, :format, :jpeg)
   """
   @spec set_ctrl(t(), ctrl_type(), term()) :: {:ok, :ok} | {:error, term()}
   def set_ctrl(%__MODULE__{resource: resource}, ctrl, value) do
     SSCMEx.Nif.camera_set_ctrl(resource, ctrl, value)
+  end
+
+  @doc """
+  Get a camera control value.
+
+  ## Control Types and return values
+  - `:window` -> `{width, height}`
+  - `:channel` -> channel index integer
+  - `:format` -> pixel format atom
+  - `:fps` -> fps integer
+
+  For channel-specific controls (`:window`, `:format`, `:fps`), this reads the
+  currently selected channel. Use `set_ctrl(camera, :channel, idx)` first.
+  """
+  @spec get_ctrl(t(), ctrl_type()) :: {:ok, term()} | {:error, term()}
+  def get_ctrl(%__MODULE__{resource: resource}, ctrl) do
+    SSCMEx.Nif.camera_get_ctrl(resource, ctrl)
   end
 
   @doc """

@@ -43,6 +43,7 @@ public:
 
 private:
     channel m_channels[CHN_MAX];
+    void clearChannelQueue(channel& ch) noexcept;
 
     int chn;
     int vencCallback(void* pData, void* pArgs);
