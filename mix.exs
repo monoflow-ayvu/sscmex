@@ -42,7 +42,8 @@ defmodule Sscmex.MixProject do
   defp deps do
     [
       {:elixir_make, "~> 0.8", runtime: false},
-      {:cc_precompiler, "~> 0.1", runtime: false}
+      {:cc_precompiler, "~> 0.1", runtime: false},
+      {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]
   end
 
