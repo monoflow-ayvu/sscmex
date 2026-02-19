@@ -19,6 +19,25 @@ def deps do
 end
 ```
 
+## Precompiled NIF target selection
+
+`SSCMEx` uses `elixir_make` + `cc_precompiler` for precompiled NIFs.
+
+- In host builds, target detection follows the current host triplet.
+- In Nerves cross-builds for `MIX_TARGET=nerves_system_sg2002`, `SSCMEx` maps the target
+  to `riscv64-buildroot-linux-musl` automatically.
+- If you set `TARGET_ARCH`, `TARGET_OS`, or `TARGET_ABI`, `SSCMEx` will not overwrite
+  those values. This lets you force a custom precompile triplet when needed.
+
+Example manual override:
+
+```bash
+export TARGET_ARCH=riscv64
+export TARGET_OS=buildroot
+export TARGET_ABI=linux-musl
+MIX_TARGET=nerves_system_sg2002 mix compile
+```
+
 ## Manual IEx flow (camera -> TPU -> results)
 
 Use this when you want to test manually without `SSCMEx.Examples.*`.

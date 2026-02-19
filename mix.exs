@@ -3,8 +3,13 @@ defmodule Sscmex.MixProject do
 
   @version "0.1.8"
   @github_url "https://github.com/monoflow-ayvu/sscmex"
+  @mix_target_triplets %{
+    "nerves_system_sg2002" => {"riscv64", "buildroot", "linux-musl"}
+  }
 
   def project do
+    maybe_set_target_triplet_from_mix_target()
+
     [
       app: :sscmex,
       version: @version,
@@ -29,6 +34,26 @@ defmodule Sscmex.MixProject do
         }
       ]
     ]
+  end
+
+  defp maybe_set_target_triplet_from_mix_target do
+    case Map.get(@mix_target_triplets, System.get_env("MIX_TARGET")) do
+      nil ->
+        :ok
+
+      {arch, os, abi} ->
+        put_env_if_missing("TARGET_ARCH", arch)
+        put_env_if_missing("TARGET_OS", os)
+        put_env_if_missing("TARGET_ABI", abi)
+    end
+  end
+
+  defp put_env_if_missing(key, value) do
+    case System.get_env(key) do
+      nil -> System.put_env(key, value)
+      "" -> System.put_env(key, value)
+      _ -> :ok
+    end
   end
 
   # Run "mix help compile.app" to learn about applications.
