@@ -138,6 +138,73 @@ jobs:
           TARGET_ABI: linux-musl
         run: MIX_ENV=prod mix elixir_make.precompile
 
+      - name: Verify consumer build restores precompiled NIF
+        shell: bash
+        env:
+          ELIXIR_MAKE_CACHE_DIR: ${{ github.workspace }}/cache
+        run: |
+          set -euo pipefail
+
+          version="$(
+            MIX_ENV=prod mix run --no-start --no-compile -e "IO.puts(\"SSCMEX_VERSION=\" <> to_string(Mix.Project.config()[:version]))" \
+            | tr -d '\r' | sed -n 's/^SSCMEX_VERSION=//p' | tail -n1
+          )"
+
+          if [ -z "${version}" ]; then
+            echo "Unable to resolve SSCMEx version"
+            exit 1
+          fi
+
+          tarball="cache/sscmex-nif-2.17-riscv64-buildroot-linux-musl-${version}.tar.gz"
+
+          if [ ! -f "${tarball}" ]; then
+            echo "Expected precompiled tarball not found: ${tarball}"
+            exit 1
+          fi
+
+          digest="$(sha256sum "${tarball}" | awk '{print $1}')"
+          cat > checksum.exs <<EOF
+          %{
+            "$(basename "${tarball}")" => "sha256:${digest}",
+          }
+          EOF
+
+          consumer_dir="$(mktemp -d)"
+
+          cat > "${consumer_dir}/mix.exs" <<EOF
+          defmodule Consumer.MixProject do
+            use Mix.Project
+
+            def project do
+              [
+                app: :consumer,
+                version: "0.1.0",
+                elixir: "~> 1.17",
+                deps: deps()
+              ]
+            end
+
+            def application, do: [extra_applications: [:logger]]
+            defp deps, do: [{:sscmex, path: "${GITHUB_WORKSPACE}"}]
+          end
+          EOF
+
+          mkdir -p "${consumer_dir}/lib"
+          cat > "${consumer_dir}/lib/consumer.ex" <<'EOF'
+          defmodule Consumer do
+          end
+          EOF
+
+          (
+            cd "${consumer_dir}"
+            MIX_ENV=prod MIX_TARGET=nerves_system_sg2002 mix deps.get
+            MIX_ENV=prod MIX_TARGET=nerves_system_sg2002 mix deps.compile elixir_make cc_precompiler
+            MAKE=false MIX_ENV=prod MIX_TARGET=nerves_system_sg2002 mix deps.compile sscmex --force
+          )
+
+          consumer_build_dir="${consumer_dir}/_build/nerves_system_sg2002_prod"
+          test -f "${consumer_build_dir}/lib/sscmex/priv/sscmex_nif.so"
+
       - name: Verify build artifacts
         shell: bash
         run: |

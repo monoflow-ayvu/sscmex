@@ -156,6 +156,7 @@ jobs:
         run: MIX_ENV=prod mix deps.get
 
       - name: Verify tag matches mix version
+        id: project_version
         env:
           RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
         shell: bash
@@ -182,12 +183,43 @@ jobs:
             exit 1
           fi
 
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Clean precompiled cache artifacts
+        shell: bash
+        run: |
+          mkdir -p cache
+          rm -f cache/*.tar.gz cache/*.tar.gz.sha256
+
       - name: Build precompiled tarball
         env:
           TARGET_ARCH: riscv64
           TARGET_OS: buildroot
           TARGET_ABI: linux-musl
         run: MIX_ENV=prod mix elixir_make.precompile
+
+      - name: Resolve precompiled tarball path
+        id: precompiled_asset
+        env:
+          PROJECT_VERSION: ${{ steps.project_version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tarball="cache/sscmex-nif-2.17-riscv64-buildroot-linux-musl-${PROJECT_VERSION}.tar.gz"
+          tarball_sha256="${tarball}.sha256"
+
+          if [ ! -f "${tarball}" ]; then
+            echo "Expected precompiled tarball missing: ${tarball}"
+            exit 1
+          fi
+
+          if [ ! -f "${tarball_sha256}" ]; then
+            echo "Expected precompiled checksum missing: ${tarball_sha256}"
+            exit 1
+          fi
+
+          echo "tarball=${tarball}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify precompiled tarball asset
         shell: bash
@@ -200,8 +232,7 @@ jobs:
         with:
           tag_name: ${{ steps.release_tag.outputs.tag }}
           name: ${{ steps.release_tag.outputs.tag }}
-          files: |
-            cache/*.tar.gz
+          files: ${{ steps.precompiled_asset.outputs.tarball }}
           fail_on_unmatched_files: true
           overwrite_files: true
 
