@@ -26,14 +26,18 @@ end
 - In host builds, target detection follows the current host triplet.
 - In Nerves cross-builds for `MIX_TARGET=nerves_system_sg2002`, `SSCMEx` maps the target
   to `riscv64-buildroot-linux-musl` automatically.
-- If you set `TARGET_ARCH`, `TARGET_OS`, or `TARGET_ABI`, `SSCMEx` will not overwrite
-  those values. This lets you force a custom precompile triplet when needed.
+- For this known Nerves target, `SSCMEx` normalizes `TARGET_ARCH`, `TARGET_OS`, and
+  `TARGET_ABI` to match published precompiled artifacts, even if those env vars are
+  already set by the host toolchain.
+- To preserve externally provided `TARGET_*` values for custom experiments, set
+  `SSCMEX_KEEP_TARGET_TRIPLET=1`.
 
 Example manual override:
 
 ```bash
+export SSCMEX_KEEP_TARGET_TRIPLET=1
 export TARGET_ARCH=riscv64
-export TARGET_OS=buildroot
+export TARGET_OS=nerves
 export TARGET_ABI=linux-musl
 MIX_TARGET=nerves_system_sg2002 mix compile
 ```

@@ -42,18 +42,23 @@ defmodule Sscmex.MixProject do
         :ok
 
       {arch, os, abi} ->
-        put_env_if_missing("TARGET_ARCH", arch)
-        put_env_if_missing("TARGET_OS", os)
-        put_env_if_missing("TARGET_ABI", abi)
+        unless keep_external_target_triplet?() do
+          put_env("TARGET_ARCH", arch)
+          put_env("TARGET_OS", os)
+          put_env("TARGET_ABI", abi)
+        end
     end
   end
 
-  defp put_env_if_missing(key, value) do
-    case System.get_env(key) do
-      nil -> System.put_env(key, value)
-      "" -> System.put_env(key, value)
-      _ -> :ok
+  defp keep_external_target_triplet? do
+    case System.get_env("SSCMEX_KEEP_TARGET_TRIPLET") do
+      nil -> false
+      value -> String.downcase(value) in ["1", "true", "yes"]
     end
+  end
+
+  defp put_env(key, value) do
+    System.put_env(key, value)
   end
 
   # Run "mix help compile.app" to learn about applications.
