@@ -202,7 +202,8 @@ jobs:
             MAKE=false MIX_ENV=prod MIX_TARGET=nerves_system_sg2002 mix deps.compile sscmex --force
           )
 
-          test -f "${consumer_dir}/_build/prod/lib/sscmex/priv/sscmex_nif.so"
+          consumer_build_dir="${consumer_dir}/_build/nerves_system_sg2002_prod"
+          test -f "${consumer_build_dir}/lib/sscmex/priv/sscmex_nif.so"
 
       - name: Verify build artifacts
         shell: bash
