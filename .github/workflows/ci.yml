@@ -198,6 +198,7 @@ jobs:
           (
             cd "${consumer_dir}"
             MIX_ENV=prod MIX_TARGET=nerves_system_sg2002 mix deps.get
+            MIX_ENV=prod MIX_TARGET=nerves_system_sg2002 mix deps.compile elixir_make cc_precompiler
             MAKE=false MIX_ENV=prod MIX_TARGET=nerves_system_sg2002 mix deps.compile sscmex --force
           )
 
