@@ -3,6 +3,7 @@ defmodule SSCMEx.Nif do
   @on_load :load_nif
 
   require Logger
+  @supported_nerves_targets ["nerves_system_sg2002"]
 
   def load_nif do
     path = :filename.join(:code.priv_dir(:sscmex), ~c"sscmex_nif")
@@ -15,14 +16,26 @@ defmodule SSCMEx.Nif do
         :ok
 
       err ->
-        case :erlang.system_info(:system_architecture) do
-          ~c"riscv64-buildroot-linux-musl" ->
-            raise "SSCMEx load_nif: #{inspect(err)}"
+        handle_load_error(err)
+    end
+  end
 
-          _ ->
-            Logger.error("SSCMEx: System not supported")
-            :ok
+  defp handle_load_error(err) do
+    if :erlang.system_info(:system_architecture) == ~c"riscv64-buildroot-linux-musl" do
+      raise "SSCMEx load_nif: #{inspect(err)}"
+    end
+
+    case System.get_env("MIX_TARGET") do
+      <<"nerves_system_", _::binary>> = mix_target ->
+        if mix_target in @supported_nerves_targets do
+          :ok
+        else
+          Logger.error("SSCMEx: Nerves target not supported: #{mix_target}")
+          :ok
         end
+
+      _ ->
+        :ok
     end
   end
 
