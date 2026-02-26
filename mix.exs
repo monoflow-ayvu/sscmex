@@ -4,7 +4,7 @@ defmodule Sscmex.MixProject do
   @version "0.1.10"
   @github_url "https://github.com/monoflow-ayvu/sscmex"
   @mix_target_triplets %{
-    "nerves_system_sg2002" => {"riscv64", "buildroot", "linux-musl"}
+    "nerves_system_sg2002" => {"riscv64", "unknown", "linux-musl"}
   }
 
   def project do
@@ -26,7 +26,7 @@ defmodule Sscmex.MixProject do
       cc_precompiler: [
         compilers: %{
           {:unix, :linux} => %{
-            "riscv64-buildroot-linux-musl" => {
+            "riscv64-unknown-linux-musl" => {
               "riscv64-unknown-linux-musl-gcc",
               "riscv64-unknown-linux-musl-g++"
             }
@@ -41,10 +41,11 @@ defmodule Sscmex.MixProject do
       nil ->
         :ok
 
-      {arch, os, abi} ->
+      {arch, vendor, abi} ->
         unless keep_external_target_triplet?() do
           put_env("TARGET_ARCH", arch)
-          put_env("TARGET_OS", os)
+          put_env("TARGET_VENDOR", vendor)
+          put_env("TARGET_OS", vendor)
           put_env("TARGET_ABI", abi)
         end
     end

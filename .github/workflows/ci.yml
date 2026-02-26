@@ -134,7 +134,7 @@ jobs:
       - name: Build precompiled NIF (riscv64)
         env:
           TARGET_ARCH: riscv64
-          TARGET_OS: buildroot
+          TARGET_OS: unknown
           TARGET_ABI: linux-musl
         run: MIX_ENV=prod mix elixir_make.precompile
 
@@ -155,7 +155,7 @@ jobs:
             exit 1
           fi
 
-          tarball="cache/sscmex-nif-2.17-riscv64-buildroot-linux-musl-${version}.tar.gz"
+          tarball="cache/sscmex-nif-2.17-riscv64-unknown-linux-musl-${version}.tar.gz"
 
           if [ ! -f "${tarball}" ]; then
             echo "Expected precompiled tarball not found: ${tarball}"

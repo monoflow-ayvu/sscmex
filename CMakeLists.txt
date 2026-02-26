@@ -34,6 +34,11 @@ endif()
 message(STATUS "PRIV_DIR: ${PRIV_DIR}")
 message(STATUS "ERTS_INCLUDE_DIR: ${ERTS_INCLUDE_DIR}")
 
+# Safety check for ERTS_INCLUDE_DIR
+if(NOT EXISTS "${ERTS_INCLUDE_DIR}")
+    message(FATAL_ERROR "ERTS_INCLUDE_DIR does not exist or is empty: '${ERTS_INCLUDE_DIR}'. Please ensure Erlang/OTP is installed and ERTS_INCLUDE_DIR is set correctly.")
+endif()
+
 # Platform-specific linker flags
 if(UNIX AND APPLE)
     set(CMAKE_SHARED_LINKER_FLAGS "-undefined dynamic_lookup")
