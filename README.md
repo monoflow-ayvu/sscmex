@@ -38,7 +38,7 @@ Example manual override:
 export SSCMEX_KEEP_TARGET_TRIPLET=1
 export TARGET_ARCH=riscv64
 export TARGET_OS=nerves
-export TARGET_ABI=linux-musl
+export TARGET_ABI=musl
 MIX_TARGET=nerves_system_sg2002 mix compile
 ```
 

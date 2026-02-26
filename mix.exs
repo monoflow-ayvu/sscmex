@@ -30,10 +30,8 @@ defmodule Sscmex.MixProject do
               "riscv64-unknown-linux-musl-gcc",
               "riscv64-unknown-linux-musl-g++"
             },
-            # Consumer with MIX_TARGET=nerves_system_sg2002 sets TARGET_OS=linux, so
-            # current_target_from_env() returns "riscv64-linux-linux-musl". We must
-            # build this target so the consumer finds the precompiled artefact.
-            "riscv64-linux-linux-musl" => {
+            # With TARGET_ABI=musl, current_target_from_env() returns "riscv64-linux-musl".
+            "riscv64-linux-musl" => {
               "riscv64-unknown-linux-musl-gcc",
               "riscv64-unknown-linux-musl-g++"
             }
@@ -53,7 +51,8 @@ defmodule Sscmex.MixProject do
           put_env("TARGET_ARCH", arch)
           put_env("TARGET_VENDOR", vendor)
           put_env("TARGET_OS", "linux")
-          put_env("TARGET_ABI", abi)
+          # Use "musl" so rustler (arch-vendor-os-abi) resolves to riscv64gc-unknown-linux-musl.
+          put_env("TARGET_ABI", if(abi == "linux-musl", do: "musl", else: abi))
         end
     end
   end

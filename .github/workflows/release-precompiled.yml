@@ -194,7 +194,7 @@ jobs:
         env:
           TARGET_ARCH: riscv64
           TARGET_OS: linux
-          TARGET_ABI: linux-musl
+          TARGET_ABI: musl
         run: MIX_ENV=prod mix elixir_make.precompile
 
       - name: Resolve precompiled tarball path
@@ -214,11 +214,19 @@ jobs:
           if [ "${#tarballs[@]}" -gt 1 ]; then
             tarball=""
             for f in "${tarballs[@]}"; do
-              if [[ "$f" == *"riscv64-linux-linux-musl"* ]]; then
+              if [[ "$f" == *"riscv64-linux-musl"* ]]; then
                 tarball="$f"
                 break
               fi
             done
+            if [ -z "${tarball}" ]; then
+              for f in "${tarballs[@]}"; do
+                if [[ "$f" == *"riscv64-linux-linux-musl"* ]]; then
+                  tarball="$f"
+                  break
+                fi
+              done
+            fi
             if [ -z "${tarball}" ]; then
               for f in "${tarballs[@]}"; do
                 if [[ "$f" == *"riscv64gc-unknown-linux-musl"* ]]; then
