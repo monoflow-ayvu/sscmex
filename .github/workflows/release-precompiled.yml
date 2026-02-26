@@ -194,7 +194,7 @@ jobs:
       - name: Build precompiled tarball
         env:
           TARGET_ARCH: riscv64
-          TARGET_OS: buildroot
+          TARGET_OS: unknown
           TARGET_ABI: linux-musl
         run: MIX_ENV=prod mix elixir_make.precompile
 
@@ -206,7 +206,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          tarball="cache/sscmex-nif-2.17-riscv64-buildroot-linux-musl-${PROJECT_VERSION}.tar.gz"
+          tarball="cache/sscmex-nif-2.17-riscv64-unknown-linux-musl-${PROJECT_VERSION}.tar.gz"
           tarball_sha256="${tarball}.sha256"
 
           if [ ! -f "${tarball}" ]; then
