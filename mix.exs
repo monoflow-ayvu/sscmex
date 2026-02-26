@@ -1,7 +1,7 @@
 defmodule Sscmex.MixProject do
   use Mix.Project
 
-  @version "0.1.11"
+  @version "0.1.12"
   @github_url "https://github.com/monoflow-ayvu/sscmex"
   @mix_target_triplets %{
     "nerves_system_sg2002" => {"riscv64", "unknown", "linux-musl"}
@@ -45,7 +45,7 @@ defmodule Sscmex.MixProject do
         unless keep_external_target_triplet?() do
           put_env("TARGET_ARCH", arch)
           put_env("TARGET_VENDOR", vendor)
-          put_env("TARGET_OS", vendor)
+          put_env("TARGET_OS", "linux")
           put_env("TARGET_ABI", abi)
         end
     end
