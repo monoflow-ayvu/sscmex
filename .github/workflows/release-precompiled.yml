@@ -194,7 +194,7 @@ jobs:
       - name: Build precompiled tarball
         env:
           TARGET_ARCH: riscv64
-          TARGET_OS: unknown
+          TARGET_OS: linux
           TARGET_ABI: linux-musl
         run: MIX_ENV=prod mix elixir_make.precompile
 
@@ -206,13 +206,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          tarball="cache/sscmex-nif-2.17-riscv64-unknown-linux-musl-${PROJECT_VERSION}.tar.gz"
-          tarball_sha256="${tarball}.sha256"
-
-          if [ ! -f "${tarball}" ]; then
-            echo "Expected precompiled tarball missing: ${tarball}"
+          shopt -s nullglob
+          tarballs=(cache/sscmex-nif-*-${PROJECT_VERSION}.tar.gz)
+          if [ "${#tarballs[@]}" -eq 0 ]; then
+            echo "Expected precompiled tarball not found: cache/sscmex-nif-*-${PROJECT_VERSION}.tar.gz"
             exit 1
           fi
+          if [ "${#tarballs[@]}" -gt 1 ]; then
+            echo "Multiple precompiled tarballs found: ${tarballs[*]}"
+            exit 1
+          fi
+          tarball="${tarballs[0]}"
+          tarball_sha256="${tarball}.sha256"
 
           if [ ! -f "${tarball_sha256}" ]; then
             echo "Expected precompiled checksum missing: ${tarball_sha256}"
