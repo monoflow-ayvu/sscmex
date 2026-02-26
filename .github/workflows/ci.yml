@@ -163,11 +163,19 @@ jobs:
           if [ "${#tarballs[@]}" -gt 1 ]; then
             tarball=""
             for f in "${tarballs[@]}"; do
-              if [[ "$f" == *"riscv64gc-unknown-linux-musl"* ]]; then
+              if [[ "$f" == *"riscv64-linux-linux-musl"* ]]; then
                 tarball="$f"
                 break
               fi
             done
+            if [ -z "${tarball}" ]; then
+              for f in "${tarballs[@]}"; do
+                if [[ "$f" == *"riscv64gc-unknown-linux-musl"* ]]; then
+                  tarball="$f"
+                  break
+                fi
+              done
+            fi
             if [ -z "${tarball}" ]; then
               for f in "${tarballs[@]}"; do
                 if [[ "$f" == *"riscv64-unknown-linux-musl"* ]]; then
