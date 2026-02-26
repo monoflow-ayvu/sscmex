@@ -52,7 +52,6 @@ jobs:
           path: |
             deps
             _build
-            cache
           key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
           restore-keys: |
             ${{ runner.os }}-mix-
@@ -162,10 +161,27 @@ jobs:
             exit 1
           fi
           if [ "${#tarballs[@]}" -gt 1 ]; then
-            echo "Multiple precompiled tarballs found: ${tarballs[*]}"
-            exit 1
+            tarball=""
+            for f in "${tarballs[@]}"; do
+              if [[ "$f" == *"riscv64gc-unknown-linux-musl"* ]]; then
+                tarball="$f"
+                break
+              fi
+            done
+            if [ -z "${tarball}" ]; then
+              for f in "${tarballs[@]}"; do
+                if [[ "$f" == *"riscv64-unknown-linux-musl"* ]]; then
+                  tarball="$f"
+                  break
+                fi
+              done
+            fi
+            if [ -z "${tarball}" ]; then
+              tarball="${tarballs[0]}"
+            fi
+          else
+            tarball="${tarballs[0]}"
           fi
-          tarball="${tarballs[0]}"
 
           if [ ! -f "${tarball}" ]; then
             echo "Expected precompiled tarball not found: ${tarball}"
