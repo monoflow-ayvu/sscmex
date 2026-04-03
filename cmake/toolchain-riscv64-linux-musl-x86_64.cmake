@@ -8,14 +8,16 @@ set(ARCH riscv)
 # Get absolute path to SDK
 if(DEFINED ENV{SG200X_SDK_PATH})
     set(SG200X_SDK_PATH $ENV{SG200X_SDK_PATH})
-
-    # Convert relative path to absolute path
     get_filename_component(SG200X_SDK_PATH_ABS "${SG200X_SDK_PATH}" ABSOLUTE)
 
-    # Construct compiler paths
-    set(COMPILER_PATH "${SG200X_SDK_PATH_ABS}/../host-tools/gcc/riscv64-linux-musl-x86_64/bin")
+    # Prefer explicit host-tools path (set by Nix devenv derivation)
+    if(DEFINED ENV{SG200X_HOST_TOOLS_PATH})
+        set(COMPILER_PATH "$ENV{SG200X_HOST_TOOLS_PATH}/gcc/riscv64-linux-musl-x86_64/bin")
+    else()
+        # Legacy: host-tools is a sibling of sg2002_recamera_emmc
+        set(COMPILER_PATH "${SG200X_SDK_PATH_ABS}/../host-tools/gcc/riscv64-linux-musl-x86_64/bin")
+    endif()
 
-    # Convert compiler paths to absolute paths
     get_filename_component(CMAKE_C_COMPILER "${COMPILER_PATH}/riscv64-unknown-linux-musl-gcc" ABSOLUTE)
     get_filename_component(CMAKE_CXX_COMPILER "${COMPILER_PATH}/riscv64-unknown-linux-musl-g++" ABSOLUTE)
     get_filename_component(CMAKE_OBJCOPY "${COMPILER_PATH}/riscv64-unknown-linux-musl-objcopy" ABSOLUTE)

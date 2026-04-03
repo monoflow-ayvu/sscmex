@@ -6,12 +6,9 @@ set(CMAKE_CXX_STANDARD 17)
 if(NOT "${SG200X_SDK_PATH}" STREQUAL "")
     message(STATUS "SG200X_SDK_PATH: ${SG200X_SDK_PATH}")
 
-    # Get the parent directory of SG200X_SDK_PATH
-    get_filename_component(SG200X_ROOT "${SG200X_SDK_PATH}" DIRECTORY)
-
-    # Set sysroot path (go up two levels from sg2002_recamera_emmc)
+    # Set sysroot path
     if("${SYSROOT}" STREQUAL "")
-        set(SYSROOT ${SG200X_ROOT}/buildroot-2021.05/output/cvitek_CV181X_musl_riscv64/host/riscv64-buildroot-linux-musl/sysroot)
+        set(SYSROOT ${SG200X_SDK_PATH}/buildroot-2021.05/output/cvitek_CV181X_musl_riscv64/host/riscv64-buildroot-linux-musl/sysroot)
     endif()
 
     message(STATUS "SYSROOT: ${SYSROOT}")

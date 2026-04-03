@@ -1,57 +1,120 @@
 { pkgs, config, ... }:
 
-{
-  # Basic packages needed for development environment
+let
+  # Nix derivation: RISCV SDK tarball (replaces wget + tar in the old task)
+  sg200x-sdk = pkgs.stdenv.mkDerivation {
+    pname = "sg200x-sdk";
+    version = "0.2.0";
+
+    src = pkgs.fetchurl {
+      url = "https://github.com/Seeed-Studio/reCamera-OS/releases/download/0.2.0/reCameraOS_sdk_v0.2.0.tar.gz";
+      sha256 = "023g8i888pl6gv24s9yglfb3dy1mbl78gdjmjwqbyr7idigamxkm";
+    };
+
+    nativeBuildInputs = [ pkgs.findutils ];
+    dontBuild = true;
+    dontConfigure = true;
+
+    installPhase = ''
+      runHook preInstall
+      find . -type l | while IFS= read -r link; do
+        [ -e "$link" ] || rm -f "$link"
+      done
+      mkdir -p "$out"
+      cp -r . "$out/"
+      runHook postInstall
+    '';
+  };
+
+  # Nix derivation: sophgo/host-tools RISCV cross-compiler
+  # autoPatchelfHook replaces the manual NixOS ELF-patching logic in the old enterShell
+  sg200x-host-tools = pkgs.stdenv.mkDerivation {
+    pname = "sg200x-host-tools";
+    version = "unstable-2024-12-19";
+
+    src = pkgs.fetchFromGitHub {
+      owner = "sophgo";
+      repo = "host-tools";
+      rev = "103c66f126fa98fcaa8b54f37fa06f6b293fd074";
+      hash = "sha256-OARUHjWRIcsKo0LVm1T4/CBaf2Lis3YKO9ZXfC5KD8E=";
+    };
+
+    nativeBuildInputs = [ pkgs.autoPatchelfHook ];
+
+    # Skip unresolvable deps from GDB binaries (gdb is not needed for cross-compilation)
+    autoPatchelfIgnoreMissingDeps = [
+      "libncursesw.so.5"
+      "libncurses.so.5"
+      "libtinfo.so.5"
+      "libpython2.7.so.1.0"
+      "liblzma.so.5"
+      "libcrypt.so.1"
+      "libdb-5.3.so"
+      "libgdbm.so.5"
+      "libuuid.so.1"
+      "libreadline.so.7"
+      "libpython3.9.so.1.0"
+    ];
+
+    # Runtime libs needed by the pre-built x86_64 GCC host binaries
+    buildInputs = [
+      pkgs.zlib
+      pkgs.ncurses
+      pkgs.stdenv.cc.cc.lib  # libstdc++.so.6, libgcc_s.so.1
+      pkgs.libmpc
+      pkgs.mpfr
+      pkgs.gmp
+    ];
+
+    dontBuild = true;
+    dontConfigure = true;
+
+    installPhase = ''
+      runHook preInstall
+
+      # Remove dangling symlinks (sysroot pseudo-fs links like /dev/fd -> /proc/self/fd
+      # that can't exist in the Nix store)
+      find . -type l | while IFS= read -r link; do
+        [ -e "$link" ] || rm -f "$link"
+      done
+
+      mkdir -p "$out"
+      cp -r gcc "$out/"
+
+      # Expose compilers in $out/bin — Nix adds this to PATH automatically.
+      # Also create riscv64-unknown-linux-musl-* aliases expected by CMake.
+      mkdir -p "$out/bin"
+      bin_dir="$out/gcc/riscv64-linux-musl-x86_64/bin"
+      for f in "$bin_dir"/*; do
+        base=$(basename "$f")
+        ln -sf "$f" "$out/bin/$base"
+        alt=$(echo "$base" | sed 's/riscv64-linux-musl-/riscv64-unknown-linux-musl-/')
+        if [ "$alt" != "$base" ]; then
+          ln -sf "$f" "$out/bin/$alt"
+        fi
+      done
+
+      runHook postInstall
+    '';
+  };
+
+in {
   packages = with pkgs; [
-    # Build essentials
-    cmake
-    gnumake
-    pkg-config
-    ninja
-    clang
-
-    # Additional tools
-    git
-    wget
-    curl
-    unzip
-
-    # Tools for SDK extraction
-    gnutar
-    gzip
-    findutils
-
-    # Basic system tools
-    coreutils
-    bashInteractive
-    which
-
-    # Libraries needed by cross-compiler
-    zlib
-    ncurses
-    glibc
-
-    # Elixir development
+    cmake gnumake pkg-config ninja clang
+    git wget curl unzip
+    gnutar gzip findutils
+    coreutils bashInteractive which
+    zlib ncurses
     inotify-tools
-
-    # Used by the example
-    autoconf
-    automake
-    fwup
-    squashfsTools
-    libmnl
-    inotify-tools
-
-    # For patching dynamically linked binaries on NixOS
-    patchelf
+    autoconf automake fwup squashfsTools libmnl
+    sg200x-host-tools
   ];
 
-  # Environment variables with absolute paths
   env = {
     SG200X_FHS = "1";
     CMAKE_TOOLCHAIN_FILE = "${config.env.DEVENV_ROOT}/cmake/toolchain-riscv64-linux-musl-x86_64.cmake";
-    SG200X_SDK_PATH = "${config.env.DEVENV_ROOT}/.devenv/state/sg200x-sdk/sg2002_recamera_emmc";
-    # Default Nerves target for the example project
+    SG200X_SDK_PATH = "${sg200x-sdk}";
+    SG200X_HOST_TOOLS_PATH = "${sg200x-host-tools}";
     MIX_TARGET = "nerves_system_sg2002";
   };
 
@@ -66,139 +129,22 @@
     };
   };
 
-  # Task to setup SDK before entering shell
-  tasks."sg200x:setup-sdk" = {
-    exec = ''
-      # Setup SDK and host-tools if not present
-      RECAMERA_ROOT="${config.env.DEVENV_ROOT}/.devenv/state/sg200x-sdk"
-
-      if [ ! -d "$RECAMERA_ROOT/sg2002_recamera_emmc" ]; then
-        echo "📦 Setting up SDK and host-tools..."
-        mkdir -p "$RECAMERA_ROOT"
-
-        # Download and extract SDK
-        echo "📁 Downloading and extracting SDK..."
-        if [ ! -f "$RECAMERA_ROOT/reCameraOS_sdk_v0.2.0.tar.gz" ]; then
-          wget -O "$RECAMERA_ROOT/reCameraOS_sdk_v0.2.0.tar.gz" \
-            "https://github.com/Seeed-Studio/reCamera-OS/releases/download/0.2.0/reCameraOS_sdk_v0.2.0.tar.gz"
-        fi
-
-        tar -xzf "$RECAMERA_ROOT/reCameraOS_sdk_v0.2.0.tar.gz" -C "$RECAMERA_ROOT" --strip-components=0
-
-        # Remove broken symlinks
-        echo "Cleaning up broken symlinks..."
-        find "$RECAMERA_ROOT" -type l -exec test ! -e {} \; -print | while read link; do
-          echo "Removing broken symlink: $link"
-          rm -f "$link"
-        done
-
-        # Clone host-tools
-        echo "🔧 Cloning host-tools..."
-        git clone --verbose --progress https://github.com/sophgo/host-tools.git "$RECAMERA_ROOT/host-tools"
-
-        echo "✅ SDK setup complete!"
-      else
-        echo "✅ SDK already set up in $RECAMERA_ROOT"
-      fi
-    '';
-    before = [ "devenv:enterShell" ];
-  };
-
-  # Shell initialization script (runs after SDK setup)
   enterShell = ''
-    # Set up environment variables with absolute paths
-    RECAMERA_ROOT="${config.env.DEVENV_ROOT}/.devenv/state/sg200x-sdk"
-    export SG200X_SDK_PATH="$RECAMERA_ROOT/sg2002_recamera_emmc"
-
-    COMPILER_ROOT="$RECAMERA_ROOT/host-tools/gcc/riscv64-linux-musl-x86_64"
-    COMPILER_DIR="$COMPILER_ROOT/bin"
-
-    # Patch cross-compiler in-place only on NixOS hosts.
-    # On non-NixOS CI runners (e.g. Ubuntu), forcing a NixOS interpreter can
-    # corrupt tool execution and cause crashes during CMake compiler checks.
-    IS_NIXOS=0
-    if [ -f /etc/NIXOS ]; then
-      IS_NIXOS=1
-    elif [ -f /etc/os-release ] && grep -q '^ID=nixos$' /etc/os-release; then
-      IS_NIXOS=1
-    fi
-
-    if [ "$IS_NIXOS" -eq 1 ] && [ -d "$COMPILER_ROOT" ] && [ ! -f "$COMPILER_ROOT/.nixos-patched" ]; then
-      echo "🔧 Patching cross-compiler for NixOS compatibility..."
-
-      # Get the NixOS dynamic linker path.
-      NIX_LD=$(cat "$NIX_CC/nix-support/dynamic-linker" 2>/dev/null || echo "/nix/store/*-glibc-*/lib/ld-linux-x86-64.so.2")
-
-      # If wildcard, resolve it.
-      if [[ "$NIX_LD" == *"*"* ]]; then
-        NIX_LD=$(ls /nix/store/*-glibc-*/lib/ld-linux-x86-64.so.2 2>/dev/null | head -1)
-      fi
-
-      if [ -n "$NIX_LD" ] && [ -f "$NIX_LD" ]; then
-        echo "   Using linker: $NIX_LD"
-
-        # Find and patch ALL ELF executables in the compiler directory tree.
-        find "$COMPILER_ROOT" -type f -executable | while read -r binary; do
-          if file "$binary" | grep -q 'ELF.*executable'; then
-            echo "   Patching: $binary"
-            patchelf --set-interpreter "$NIX_LD" "$binary" 2>/dev/null || true
-          fi
-        done
-
-        # Mark as patched.
-        touch "$COMPILER_ROOT/.nixos-patched"
-        echo "✅ Cross-compiler patched successfully!"
-      else
-        echo "⚠️  Could not find NixOS dynamic linker, skipping patching"
-      fi
-    fi
-
-    # Add cross-compiler to PATH with absolute path
-    # This allows CMake's find_program() to locate the compiler
-    # NOTE: We do NOT set CC/CXX environment variables globally because:
-    # 1. CMake uses the toolchain file (CMAKE_TOOLCHAIN_FILE) for cross-compilation
-    # 2. Other build tools (like Nerves' port Makefile) need to use the host compiler
-    export PATH="$COMPILER_DIR:$PATH"
-
-    # Create symlinks for toolchain naming convention
-    if [ -d "$COMPILER_DIR" ] && [ ! -f "$COMPILER_DIR/riscv64-unknown-linux-musl-gcc" ]; then
-      echo "🔗 Creating compiler symlinks for toolchain compatibility..."
-      for tool in gcc g++ objcopy objdump ar as ld nm ranlib strip; do
-        if [ -f "$COMPILER_DIR/riscv64-linux-musl-$tool" ]; then
-          ln -sf "riscv64-linux-musl-$tool" "$COMPILER_DIR/riscv64-unknown-linux-musl-$tool"
-        fi
-      done
-    fi
-
-    # Enable shell history for erlang/elixir
     export ERL_AFLAGS="-kernel shell_history enabled"
-
-    # Configure UTF-8 locale for proper Unicode support
     export LC_ALL="en_US.UTF-8"
     export LANG="en_US.UTF-8"
 
-    echo "🚀 SG200X devenv Development Environment Ready!"
-    echo "📁 SDK Path: $SG200X_SDK_PATH"
-    echo "🔧 Toolchain File: ${config.env.CMAKE_TOOLCHAIN_FILE}"
-    echo "🔧 Compiler Dir: $COMPILER_DIR"
-    echo "🎯 Nerves Target: $MIX_TARGET"
-    echo ""
-    echo "ℹ️  Cross-compilation is configured via CMAKE_TOOLCHAIN_FILE"
-    echo "   Use: cmake -DCMAKE_TOOLCHAIN_FILE=\$CMAKE_TOOLCHAIN_FILE ."
-    echo ""
+    echo "SG200X devenv Development Environment Ready!"
+    echo "SDK Path: $SG200X_SDK_PATH"
+    echo "Toolchain File: $CMAKE_TOOLCHAIN_FILE"
+    echo "Host Tools: $SG200X_HOST_TOOLS_PATH"
+    echo "Nerves Target: $MIX_TARGET"
   '';
 
-  # Enable Cachix
   cachix = {
     enable = true;
     pull = [ "pre-commit-hooks" "fermuch" ];
   };
 
-  # Enable devcontainer to generate a devcontainer.json file
   devcontainer.enable = true;
-
-  # Publish libraries to environment
-  env.LIBRARY_PATH = pkgs.lib.makeLibraryPath (with pkgs; [ zlib ncurses glibc libmnl ]);
-  env.LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (with pkgs; [ zlib ncurses glibc libmnl ]);
-  env.PKG_CONFIG_PATH = pkgs.lib.makeSearchPath "lib/pkgconfig" (with pkgs; [ zlib ncurses glibc libmnl ]);
 }
