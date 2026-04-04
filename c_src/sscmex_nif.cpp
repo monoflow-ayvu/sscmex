@@ -16,6 +16,12 @@
 #include "sscma/porting/ma_device.h"
 #include "sscma/porting/ma_camera.h"
 
+#include <opencv2/opencv.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/imgcodecs/imgcodecs.hpp>
+
+#define SSCMEX_FORMAT_WEBP 100
+
 using namespace ma::engine;
 using namespace ma::model;
 using namespace ma;
@@ -494,6 +500,474 @@ static ERL_NIF_TERM perf_to_map(ErlNifEnv* env, const ma_perf_t& perf) {
     enif_make_map_put(env, map, make_atom(env, "inference"), enif_make_int64(env, perf.inference), &map);
     enif_make_map_put(env, map, make_atom(env, "postprocess"), enif_make_int64(env, perf.postprocess), &map);
     return map;
+}
+
+// Helper: get OpenCV color conversion code for src_format -> dst_format
+// Returns -1 if conversion not supported
+static int get_cv_color_code(ma_pixel_format_t src_format, int dst_fmt) {
+    // dst_fmt is either a ma_pixel_format_t or SSCMEX_FORMAT_WEBP
+    // Compressed outputs are handled separately, not via cvtColor
+
+    if (src_format == MA_PIXEL_FORMAT_RGB888) {
+        switch (dst_fmt) {
+            case MA_PIXEL_FORMAT_RGB565:    return -1; // handled via custom loop
+            case MA_PIXEL_FORMAT_GRAYSCALE: return ::cv::COLOR_RGB2GRAY;
+            case SSCMEX_FORMAT_WEBP:        return -1; // compressed, handled separately
+            default: return -1;
+        }
+    } else if (src_format == MA_PIXEL_FORMAT_RGB565) {
+        switch (dst_fmt) {
+            case MA_PIXEL_FORMAT_RGB888:    return -1; // handled via custom loop
+            case MA_PIXEL_FORMAT_GRAYSCALE: return -1; // handled via RGB888 intermediate
+            default: return -1;
+        }
+    } else if (src_format == MA_PIXEL_FORMAT_YUV422) {
+        switch (dst_fmt) {
+            case MA_PIXEL_FORMAT_RGB888:    return ::cv::COLOR_YUV2RGB_YUYV;
+            case MA_PIXEL_FORMAT_GRAYSCALE: return ::cv::COLOR_YUV2GRAY_YUYV;
+            case MA_PIXEL_FORMAT_RGB565:    return -1; // via RGB888 intermediate
+            default: return -1;
+        }
+    } else if (src_format == MA_PIXEL_FORMAT_GRAYSCALE) {
+        switch (dst_fmt) {
+            case MA_PIXEL_FORMAT_RGB888:    return ::cv::COLOR_GRAY2RGB;
+            case MA_PIXEL_FORMAT_RGB565:    return -1; // via RGB888 intermediate
+            default: return -1;
+        }
+    }
+    return -1;
+}
+
+// Helper: get OpenCV interpolation method from atom
+static int get_cv_interpolation(ErlNifEnv* env, ERL_NIF_TERM term) {
+    char atom[32];
+    if (!enif_get_atom(env, term, atom, sizeof(atom), ERL_NIF_LATIN1)) {
+        return ::cv::INTER_LINEAR; // default
+    }
+    if (strcmp(atom, "nearest") == 0)     return ::cv::INTER_NEAREST;
+    if (strcmp(atom, "linear") == 0)      return ::cv::INTER_LINEAR;
+    if (strcmp(atom, "cubic") == 0)       return ::cv::INTER_CUBIC;
+    if (strcmp(atom, "area") == 0)        return ::cv::INTER_AREA;
+    if (strcmp(atom, "lanczos4") == 0)    return ::cv::INTER_LANCZOS4;
+    return ::cv::INTER_LINEAR; // default
+}
+
+// Helper: parse format atom to integer (ma_pixel_format_t value or SSCMEX_FORMAT_WEBP)
+static int parse_format_atom_cstr(const char* atom) {
+    if (strcmp(atom, "rgb888") == 0)         return MA_PIXEL_FORMAT_RGB888;
+    if (strcmp(atom, "rgb565") == 0)         return MA_PIXEL_FORMAT_RGB565;
+    if (strcmp(atom, "yuv422") == 0)         return MA_PIXEL_FORMAT_YUV422;
+    if (strcmp(atom, "gray") == 0)           return MA_PIXEL_FORMAT_GRAYSCALE;
+    if (strcmp(atom, "grayscale") == 0)      return MA_PIXEL_FORMAT_GRAYSCALE;
+    if (strcmp(atom, "jpeg") == 0)           return MA_PIXEL_FORMAT_JPEG;
+    if (strcmp(atom, "webp") == 0)           return SSCMEX_FORMAT_WEBP;
+    return -1;
+}
+
+// Helper: format integer (ma_pixel_format_t or SSCMEX_FORMAT_WEBP) to atom
+static ERL_NIF_TERM format_int_to_atom(ErlNifEnv* env, int fmt) {
+    switch (fmt) {
+        case MA_PIXEL_FORMAT_RGB888:    return make_atom(env, "rgb888");
+        case MA_PIXEL_FORMAT_RGB565:    return make_atom(env, "rgb565");
+        case MA_PIXEL_FORMAT_YUV422:    return make_atom(env, "yuv422");
+        case MA_PIXEL_FORMAT_GRAYSCALE: return make_atom(env, "gray");
+        case MA_PIXEL_FORMAT_JPEG:      return make_atom(env, "jpeg");
+        case SSCMEX_FORMAT_WEBP:        return make_atom(env, "webp");
+        default:                        return make_atom(env, "unknown");
+    }
+}
+
+// Helper: build an SSCMEx.Image struct return term from raw data
+static ERL_NIF_TERM make_image_struct_ex(ErlNifEnv* env, int fmt,
+                                          int width, int height,
+                                          const uint8_t* data, size_t data_size) {
+    ErlNifBinary out_bin;
+    if (!enif_alloc_binary(data_size, &out_bin)) {
+        return make_error(env, "allocation_failed");
+    }
+    if (data_size > 0) {
+        memcpy(out_bin.data, data, data_size);
+    }
+
+    ERL_NIF_TERM map = enif_make_new_map(env);
+    ERL_NIF_TERM struct_name;
+    ERL_NIF_TERM struct_ns;
+    enif_make_map_put(env, map, make_atom(env, "__struct__"),
+                      enif_make_tuple2(env,
+                          make_atom(env, "Elixir.SSCMEx.Image"),
+                          make_atom(env, "SSCMEx.Image")),
+                      &map);
+    enif_make_map_put(env, map, make_atom(env, "width"),
+                      enif_make_int(env, width), &map);
+    enif_make_map_put(env, map, make_atom(env, "height"),
+                      enif_make_int(env, height), &map);
+    enif_make_map_put(env, map, make_atom(env, "format"),
+                      format_int_to_atom(env, fmt), &map);
+    enif_make_map_put(env, map, make_atom(env, "data"),
+                      enif_make_binary(env, &out_bin), &map);
+    enif_make_map_put(env, map, make_atom(env, "size"),
+                      enif_make_uint64(env, data_size), &map);
+    return map;
+}
+
+// NIF: image_convert - format conversion (RGB888/RGB565/YUV422/Grayscale <-> RGB888/RGB565/Grayscale/JPEG/WebP)
+static ERL_NIF_TERM image_convert(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    // argv[0] = image struct, argv[1] = target format atom, argv[2] = quality (int, for JPEG/WebP)
+    if (argc != 3) return enif_make_badarg(env);
+
+    ma_img_t img;
+    ErlNifBinary bin;
+    if (!get_image_struct(env, argv[0], &img, &bin)) {
+        return make_error(env, "invalid_image_struct");
+    }
+
+    // Parse target format
+    char fmt_atom[32];
+    if (!enif_get_atom(env, argv[1], fmt_atom, sizeof(fmt_atom), ERL_NIF_LATIN1)) {
+        return make_error(env, "invalid_target_format");
+    }
+    int dst_fmt = parse_format_atom_cstr(fmt_atom);
+    if (dst_fmt < 0) {
+        return make_error(env, "unsupported_target_format");
+    }
+
+    // Parse quality (for JPEG/WebP)
+    int quality = 85;
+    int q_int;
+    if (enif_get_int(env, argv[2], &q_int) && q_int > 0 && q_int <= 100) {
+        quality = q_int;
+    }
+
+    ma_pixel_format_t src_fmt = img.format;
+
+    // Same format -> return copy
+    if (src_fmt == static_cast<ma_pixel_format_t>(dst_fmt)) {
+        return make_ok(env, make_image_struct_ex(env, dst_fmt, img.width, img.height, img.data, img.size));
+    }
+
+    // --- Compressed output (JPEG, WebP) ---
+    if (dst_fmt == MA_PIXEL_FORMAT_JPEG || dst_fmt == SSCMEX_FORMAT_WEBP) {
+        // Build ::cv::Mat from source
+        ::cv::Mat src_mat;
+        if (src_fmt == MA_PIXEL_FORMAT_RGB888) {
+            src_mat = ::cv::Mat(img.height, img.width, CV_8UC3, img.data);
+        } else if (src_fmt == MA_PIXEL_FORMAT_GRAYSCALE) {
+            src_mat = ::cv::Mat(img.height, img.width, CV_8UC1, img.data);
+        } else if (src_fmt == MA_PIXEL_FORMAT_YUV422) {
+            // YUV422 -> RGB888 first
+            ::cv::Mat yuv_mat(img.height, img.width, CV_8UC2, img.data);
+            ::cv::cvtColor(yuv_mat, src_mat, ::cv::COLOR_YUV2RGB_YUYV);
+        } else if (src_fmt == MA_PIXEL_FORMAT_RGB565) {
+            // RGB565 -> RGB888 via custom loop
+            src_mat = ::cv::Mat(img.height, img.width, CV_8UC3);
+            const uint16_t* src16 = reinterpret_cast<const uint16_t*>(img.data);
+            for (int i = 0; i < img.height * img.width; i++) {
+                uint16_t pixel = src16[i];
+                src_mat.data[i * 3 + 0] = ((pixel >> 11) & 0x1F) * 255 / 31;
+                src_mat.data[i * 3 + 1] = ((pixel >> 5) & 0x3F) * 255 / 63;
+                src_mat.data[i * 3 + 2] = (pixel & 0x1F) * 255 / 31;
+            }
+        } else if (src_fmt == MA_PIXEL_FORMAT_JPEG) {
+            // JPEG input - decode first, then re-encode to target format
+            std::vector<uchar> jpeg_buf(img.data, img.data + img.size);
+            src_mat = ::cv::imdecode(jpeg_buf, ::cv::IMREAD_COLOR); // Decode to RGB
+            if (src_mat.empty()) {
+                return make_error(env, "jpeg_decode_failed");
+            }
+            // OpenCV loads as BGR by default, convert to RGB
+            ::cv::Mat rgb_mat;
+            ::cv::cvtColor(src_mat, rgb_mat, ::cv::COLOR_BGR2RGB);
+            src_mat = rgb_mat;
+        } else {
+            return make_error(env, "unsupported_source_format_for_compressed_output");
+        }
+
+        // Encode to JPEG or WebP
+        std::vector<int> encode_params;
+        std::string ext;
+        if (dst_fmt == MA_PIXEL_FORMAT_JPEG) {
+            ext = ".jpg";
+            encode_params.push_back(::cv::IMWRITE_JPEG_QUALITY);
+            encode_params.push_back(quality);
+        } else {
+            ext = ".webp";
+            encode_params.push_back(::cv::IMWRITE_WEBP_QUALITY);
+            encode_params.push_back(quality);
+        }
+
+        std::vector<uchar> encoded;
+        if (!::cv::imencode(ext, src_mat, encoded, encode_params)) {
+            return make_error(env, "image_encoding_failed");
+        }
+
+        return make_ok(env, make_image_struct_ex(env, dst_fmt, img.width, img.height,
+                                                  encoded.data(), encoded.size()));
+    }
+
+    // --- Compressed input (JPEG) to raw output ---
+    if (src_fmt == MA_PIXEL_FORMAT_JPEG) {
+        // Decode JPEG
+        std::vector<uchar> jpeg_buf(img.data, img.data + img.size);
+        ::cv::Mat decoded = ::cv::imdecode(jpeg_buf, ::cv::IMREAD_UNCHANGED);
+        if (decoded.empty()) {
+            return make_error(env, "jpeg_decode_failed");
+        }
+
+        int actual_width = decoded.cols;
+        int actual_height = decoded.rows;
+
+        // Convert channel count to target format
+        ::cv::Mat converted;
+        if (dst_fmt == MA_PIXEL_FORMAT_RGB888) {
+            if (decoded.channels() == 1) {
+                ::cv::cvtColor(decoded, converted, ::cv::COLOR_GRAY2RGB);
+            } else if (decoded.channels() == 4) {
+                ::cv::cvtColor(decoded, converted, ::cv::COLOR_BGRA2RGB);
+            } else if (decoded.channels() == 3) {
+                // OpenCV decodes JPEG as BGR by default
+                ::cv::cvtColor(decoded, converted, ::cv::COLOR_BGR2RGB);
+            } else {
+                converted = decoded;
+            }
+        } else if (dst_fmt == MA_PIXEL_FORMAT_GRAYSCALE) {
+            if (decoded.channels() == 3) {
+                ::cv::cvtColor(decoded, converted, ::cv::COLOR_BGR2GRAY);
+            } else if (decoded.channels() == 4) {
+                ::cv::cvtColor(decoded, converted, ::cv::COLOR_BGRA2GRAY);
+            } else {
+                converted = decoded;
+            }
+        } else if (dst_fmt == MA_PIXEL_FORMAT_RGB565) {
+            // Go to RGB888 first
+            ::cv::Mat rgb;
+            if (decoded.channels() == 1) {
+                ::cv::cvtColor(decoded, rgb, ::cv::COLOR_GRAY2RGB);
+            } else if (decoded.channels() == 4) {
+                ::cv::cvtColor(decoded, rgb, ::cv::COLOR_BGRA2RGB);
+            } else if (decoded.channels() == 3) {
+                ::cv::cvtColor(decoded, rgb, ::cv::COLOR_BGR2RGB);
+            } else {
+                rgb = decoded;
+            }
+            // RGB888 -> RGB565
+            size_t out_size = static_cast<size_t>(actual_width) * actual_height * 2;
+            std::vector<uint8_t> rgb565(out_size);
+            for (int i = 0; i < actual_width * actual_height; i++) {
+                uint8_t r = rgb.data[i * 3 + 0];
+                uint8_t g = rgb.data[i * 3 + 1];
+                uint8_t b = rgb.data[i * 3 + 2];
+                uint16_t pixel = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+                rgb565[i * 2 + 0] = pixel & 0xFF;
+                rgb565[i * 2 + 1] = (pixel >> 8) & 0xFF;
+            }
+            return make_ok(env, make_image_struct_ex(env, dst_fmt, actual_width, actual_height,
+                                                      rgb565.data(), out_size));
+        } else {
+            return make_error(env, "unsupported_jpeg_target_format");
+        }
+
+        if (converted.isContinuous()) {
+            return make_ok(env, make_image_struct_ex(env, dst_fmt, actual_width, actual_height,
+                                                      converted.data, converted.total() * converted.elemSize()));
+        } else {
+            // Clone to ensure continuous memory
+            ::cv::Mat continuous = converted.clone();
+            return make_ok(env, make_image_struct_ex(env, dst_fmt, actual_width, actual_height,
+                                                      continuous.data, continuous.total() * continuous.elemSize()));
+        }
+    }
+
+    // --- Raw-to-raw conversion ---
+
+    // Build source ::cv::Mat
+    ::cv::Mat src_mat;
+    if (src_fmt == MA_PIXEL_FORMAT_RGB888) {
+        src_mat = ::cv::Mat(img.height, img.width, CV_8UC3, img.data);
+    } else if (src_fmt == MA_PIXEL_FORMAT_RGB565) {
+        src_mat = ::cv::Mat(img.height, img.width, CV_8UC2, img.data);
+    } else if (src_fmt == MA_PIXEL_FORMAT_YUV422) {
+        src_mat = ::cv::Mat(img.height, img.width, CV_8UC2, img.data);
+    } else if (src_fmt == MA_PIXEL_FORMAT_GRAYSCALE) {
+        src_mat = ::cv::Mat(img.height, img.width, CV_8UC1, img.data);
+    } else {
+        return make_error(env, "unsupported_source_format");
+    }
+
+    // Try OpenCV color conversion first
+    int cv_code = get_cv_color_code(src_fmt, dst_fmt);
+    if (cv_code >= 0) {
+        ::cv::Mat converted;
+        ::cv::cvtColor(src_mat, converted, cv_code);
+        if (converted.isContinuous()) {
+            return make_ok(env, make_image_struct_ex(env, dst_fmt, img.width, img.height,
+                                                      converted.data, converted.total() * converted.elemSize()));
+        } else {
+            ::cv::Mat continuous = converted.clone();
+            return make_ok(env, make_image_struct_ex(env, dst_fmt, img.width, img.height,
+                                                      continuous.data, continuous.total() * continuous.elemSize()));
+        }
+    }
+
+    // RGB565 -> RGB888 (custom loop)
+    if (src_fmt == MA_PIXEL_FORMAT_RGB565 && dst_fmt == MA_PIXEL_FORMAT_RGB888) {
+        ::cv::Mat dst_mat(img.height, img.width, CV_8UC3);
+        const uint16_t* src16 = reinterpret_cast<const uint16_t*>(img.data);
+        for (int i = 0; i < img.height * img.width; i++) {
+            uint16_t pixel = src16[i];
+            dst_mat.data[i * 3 + 0] = ((pixel >> 11) & 0x1F) * 255 / 31;
+            dst_mat.data[i * 3 + 1] = ((pixel >> 5) & 0x3F) * 255 / 63;
+            dst_mat.data[i * 3 + 2] = (pixel & 0x1F) * 255 / 31;
+        }
+        return make_ok(env, make_image_struct_ex(env, dst_fmt, img.width, img.height,
+                                                  dst_mat.data, dst_mat.total() * dst_mat.elemSize()));
+    }
+
+    // RGB888 -> RGB565 (custom loop)
+    if (src_fmt == MA_PIXEL_FORMAT_RGB888 && dst_fmt == MA_PIXEL_FORMAT_RGB565) {
+        size_t out_size = static_cast<size_t>(img.width) * img.height * 2;
+        std::vector<uint8_t> rgb565(out_size);
+        for (int i = 0; i < img.width * img.height; i++) {
+            uint8_t r = img.data[i * 3 + 0];
+            uint8_t g = img.data[i * 3 + 1];
+            uint8_t b = img.data[i * 3 + 2];
+            uint16_t pixel = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+            rgb565[i * 2 + 0] = pixel & 0xFF;
+            rgb565[i * 2 + 1] = (pixel >> 8) & 0xFF;
+        }
+        return make_ok(env, make_image_struct_ex(env, dst_fmt, img.width, img.height,
+                                                  rgb565.data(), out_size));
+    }
+
+    // Multi-step conversions via RGB888 intermediate
+    // YUV422 -> RGB565: YUV422 -> RGB888 -> RGB565
+    if (src_fmt == MA_PIXEL_FORMAT_YUV422 && dst_fmt == MA_PIXEL_FORMAT_RGB565) {
+        ::cv::Mat rgb_mat;
+        ::cv::cvtColor(src_mat, rgb_mat, ::cv::COLOR_YUV2RGB_YUYV);
+        size_t out_size = static_cast<size_t>(img.width) * img.height * 2;
+        std::vector<uint8_t> rgb565(out_size);
+        for (int i = 0; i < img.width * img.height; i++) {
+            uint8_t r = rgb_mat.data[i * 3 + 0];
+            uint8_t g = rgb_mat.data[i * 3 + 1];
+            uint8_t b = rgb_mat.data[i * 3 + 2];
+            uint16_t pixel = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+            rgb565[i * 2 + 0] = pixel & 0xFF;
+            rgb565[i * 2 + 1] = (pixel >> 8) & 0xFF;
+        }
+        return make_ok(env, make_image_struct_ex(env, dst_fmt, img.width, img.height,
+                                                  rgb565.data(), out_size));
+    }
+
+    // RGB565 -> Grayscale: RGB565 -> RGB888 -> Grayscale
+    if (src_fmt == MA_PIXEL_FORMAT_RGB565 && dst_fmt == MA_PIXEL_FORMAT_GRAYSCALE) {
+        ::cv::Mat rgb_mat(img.height, img.width, CV_8UC3);
+        const uint16_t* src16 = reinterpret_cast<const uint16_t*>(img.data);
+        for (int i = 0; i < img.height * img.width; i++) {
+            uint16_t pixel = src16[i];
+            rgb_mat.data[i * 3 + 0] = ((pixel >> 11) & 0x1F) * 255 / 31;
+            rgb_mat.data[i * 3 + 1] = ((pixel >> 5) & 0x3F) * 255 / 63;
+            rgb_mat.data[i * 3 + 2] = (pixel & 0x1F) * 255 / 31;
+        }
+        ::cv::Mat gray_mat;
+        ::cv::cvtColor(rgb_mat, gray_mat, ::cv::COLOR_RGB2GRAY);
+        return make_ok(env, make_image_struct_ex(env, dst_fmt, img.width, img.height,
+                                                  gray_mat.data, gray_mat.total() * gray_mat.elemSize()));
+    }
+
+    // Grayscale -> RGB565: Grayscale -> RGB888 -> RGB565
+    if (src_fmt == MA_PIXEL_FORMAT_GRAYSCALE && dst_fmt == MA_PIXEL_FORMAT_RGB565) {
+        ::cv::Mat rgb_mat;
+        ::cv::cvtColor(src_mat, rgb_mat, ::cv::COLOR_GRAY2RGB);
+        size_t out_size = static_cast<size_t>(img.width) * img.height * 2;
+        std::vector<uint8_t> rgb565(out_size);
+        for (int i = 0; i < img.width * img.height; i++) {
+            uint8_t r = rgb_mat.data[i * 3 + 0];
+            uint8_t g = rgb_mat.data[i * 3 + 1];
+            uint8_t b = rgb_mat.data[i * 3 + 2];
+            uint16_t pixel = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+            rgb565[i * 2 + 0] = pixel & 0xFF;
+            rgb565[i * 2 + 1] = (pixel >> 8) & 0xFF;
+        }
+        return make_ok(env, make_image_struct_ex(env, dst_fmt, img.width, img.height,
+                                                  rgb565.data(), out_size));
+    }
+
+    return make_error(env, "unsupported_conversion");
+}
+
+// NIF: image_resize - resize with interpolation method selection
+static ERL_NIF_TERM image_resize(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    // argv[0] = image struct, argv[1] = {width, height} tuple, argv[2] = interpolation atom
+    if (argc != 3) return enif_make_badarg(env);
+
+    ma_img_t img;
+    ErlNifBinary bin;
+    if (!get_image_struct(env, argv[0], &img, &bin)) {
+        return make_error(env, "invalid_image_struct");
+    }
+
+    // Parse target size tuple
+    if (!enif_is_tuple(env, argv[1])) {
+        return make_error(env, "invalid_size_tuple");
+    }
+    const ERL_NIF_TERM* tuple_elems;
+    int tuple_arity;
+    if (!enif_get_tuple(env, argv[1], &tuple_arity, &tuple_elems) || tuple_arity != 2) {
+        return make_error(env, "invalid_size_tuple");
+    }
+    int new_width, new_height;
+    if (!enif_get_int(env, tuple_elems[0], &new_width) || new_width <= 0) {
+        return make_error(env, "invalid_width");
+    }
+    if (!enif_get_int(env, tuple_elems[1], &new_height) || new_height <= 0) {
+        return make_error(env, "invalid_height");
+    }
+
+    // Get interpolation method
+    int interpolation = get_cv_interpolation(env, argv[2]);
+
+    // Build ::cv::Mat from source data
+    ::cv::Mat src_mat;
+    if (img.format == MA_PIXEL_FORMAT_RGB888) {
+        src_mat = ::cv::Mat(img.height, img.width, CV_8UC3, img.data);
+    } else if (img.format == MA_PIXEL_FORMAT_RGB565 || img.format == MA_PIXEL_FORMAT_YUV422) {
+        src_mat = ::cv::Mat(img.height, img.width, CV_8UC2, img.data);
+    } else if (img.format == MA_PIXEL_FORMAT_GRAYSCALE) {
+        src_mat = ::cv::Mat(img.height, img.width, CV_8UC1, img.data);
+    } else if (img.format == MA_PIXEL_FORMAT_JPEG) {
+        // Decode JPEG first
+        std::vector<uchar> jpeg_buf(img.data, img.data + img.size);
+        src_mat = ::cv::imdecode(jpeg_buf, ::cv::IMREAD_UNCHANGED);
+        if (src_mat.empty()) {
+            return make_error(env, "jpeg_decode_failed");
+        }
+    } else {
+        return make_error(env, "unsupported_source_format");
+    }
+
+    // Resize
+    ::cv::Mat resized;
+    ::cv::resize(src_mat, resized, ::cv::Size(new_width, new_height), 0, 0, interpolation);
+
+    if (!resized.isContinuous()) {
+        resized = resized.clone();
+    }
+
+    // For JPEG input, re-encode as JPEG
+    if (img.format == MA_PIXEL_FORMAT_JPEG) {
+        std::vector<int> encode_params;
+        encode_params.push_back(::cv::IMWRITE_JPEG_QUALITY);
+        encode_params.push_back(85);
+        std::vector<uchar> encoded;
+        if (!::cv::imencode(".jpg", resized, encoded, encode_params)) {
+            return make_error(env, "jpeg_encode_failed");
+        }
+        return make_ok(env, make_image_struct_ex(env, MA_PIXEL_FORMAT_JPEG, new_width, new_height,
+                                                  encoded.data(), encoded.size()));
+    }
+
+    size_t out_size = resized.total() * resized.elemSize();
+    return make_ok(env, make_image_struct_ex(env, img.format, new_width, new_height,
+                                              resized.data, out_size));
 }
 
 // NIF: Create new engine (uninitialized)
@@ -1444,6 +1918,10 @@ static ErlNifFunc nif_functions[] = {
     {"camera_set_ctrl", 3, camera_set_ctrl, 0},
     {"camera_get_ctrl", 2, camera_get_ctrl, 0},
     {"camera_get_id", 1, camera_get_id, 0},
+
+    // Image processing functions
+    {"image_convert", 3, image_convert, ERL_NIF_DIRTY_JOB_CPU_BOUND},
+    {"image_resize", 3, image_resize, ERL_NIF_DIRTY_JOB_CPU_BOUND},
 };
 
 // NIF initialization - register resource type

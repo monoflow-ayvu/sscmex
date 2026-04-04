@@ -138,6 +138,33 @@ if(DEFINED SG200X_SDK_PATH AND NOT "${SG200X_SDK_PATH}" STREQUAL "")
         COMMENT "Copying TPU libraries to priv/lib"
     )
     message(STATUS "TPU libraries will be bundled in: ${PRIV_LIB_DIR}")
+
+    # OpenCV 3.2.0 for image processing NIF functions
+    set(OPENCV_SDK_PATH "${TPU_SDK_PATH}/opencv")
+    if(EXISTS "${OPENCV_SDK_PATH}/include")
+        include_directories(SYSTEM "${OPENCV_SDK_PATH}/include")
+        include_directories(SYSTEM "${OPENCV_SDK_PATH}/include/opencv")
+        message(STATUS "OpenCV includes: ${OPENCV_SDK_PATH}/include")
+    endif()
+    if(EXISTS "${OPENCV_SDK_PATH}/lib")
+        link_directories("${OPENCV_SDK_PATH}/lib")
+        message(STATUS "OpenCV libs: ${OPENCV_SDK_PATH}/lib")
+    endif()
+
+    target_link_libraries(sscmex_nif PRIVATE
+        opencv_core
+        opencv_imgproc
+        opencv_imgcodecs
+    )
+
+    # Copy OpenCV shared libraries to priv/lib for bundling with the NIF
+    add_custom_command(TARGET sscmex_nif POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${OPENCV_SDK_PATH}/lib/libopencv_core.so.3.2.0" "${PRIV_LIB_DIR}/"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${OPENCV_SDK_PATH}/lib/libopencv_imgproc.so.3.2.0" "${PRIV_LIB_DIR}/"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${OPENCV_SDK_PATH}/lib/libopencv_imgcodecs.so.3.2.0" "${PRIV_LIB_DIR}/"
+        COMMENT "Copying OpenCV libraries to priv/lib"
+    )
+    message(STATUS "OpenCV libraries will be bundled in: ${PRIV_LIB_DIR}")
 endif()
 
 # Install to priv directory

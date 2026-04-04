@@ -56,3 +56,10 @@ example/deps
 
 
 .sisyphus
+
+
+# built files
+priv/*.so
+priv/lib/*.so
+priv/lib/*.so.*
+cmake_build

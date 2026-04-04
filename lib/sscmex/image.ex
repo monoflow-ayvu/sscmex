@@ -29,6 +29,18 @@ defmodule SSCMEx.Image do
       {:ok, results} = SSCMEx.Model.run(model, image)
   """
 
+  @typedoc """
+  Supported pixel formats for convert operations.
+  Note: YUV422 can only be used as input (YUV422→RGB/Grayscale),
+  not as output (RGB→YUV422 is not supported by OpenCV 3.2.0).
+  """
+  @type convert_format :: :rgb888 | :rgb565 | :yuv422 | :gray | :jpeg | :webp
+
+  @typedoc """
+  Interpolation methods for resize operations.
+  """
+  @type interpolation :: :nearest | :bilinear | :bicubic | :area | :lanczos4
+
   @type raw_format :: :rgb888 | :rgb888_planar | :rgb565 | :yuv422 | :gray
   @type encoded_format :: :jpeg | :h264 | :h265
   @type format :: raw_format() | encoded_format()
@@ -72,6 +84,54 @@ defmodule SSCMEx.Image do
       timestamp: nil,
       key: nil
     }
+  end
+
+  @doc """
+  Convert image to a different format.
+
+  ## Supported conversions
+
+  Raw formats (RGB888, RGB565, YUV422, Grayscale):
+  - RGB888 ↔ Grayscale
+  - RGB888 ↔ RGB565
+  - YUV422 → RGB888/Grayscale (note: reverse not supported)
+
+  Compressed formats:
+  - Any raw format → JPEG
+  - Any raw format → WebP (requires libwebp support in SDK)
+
+  ## Options
+
+    * `:quality` - JPEG/WebP quality 0-100 (default: 85)
+
+  ## Examples
+
+      {:ok, webp} = SSCMEx.Image.convert(image, :webp, quality: 90)
+      {:ok, gray} = SSCMEx.Image.convert(image, :gray)
+      {:ok, rgb} = SSCMEx.Image.convert(yuv_image, :rgb888)
+  """
+  @spec convert(t(), convert_format(), keyword()) :: {:ok, t()} | {:error, atom()}
+  def convert(%__MODULE__{} = image, format, opts \\ []) do
+    SSCMEx.Nif.image_convert(image, format, opts)
+  end
+
+  @doc """
+  Resize image to new dimensions.
+
+  ## Options
+
+    * `:interpolation` - `:nearest`, `:bilinear` (default), `:bicubic`, `:area`, `:lanczos4`
+
+  ## Examples
+
+      {:ok, small} = SSCMEx.Image.resize(image, {320, 240})
+      {:ok, thumb} = SSCMEx.Image.resize(image, {160, 120}, interpolation: :lanczos4)
+  """
+  @spec resize(t(), {pos_integer(), pos_integer()}, keyword()) ::
+          {:ok, t()} | {:error, atom()}
+  def resize(%__MODULE__{} = image, {w, h}, opts \\ [])
+      when is_integer(w) and is_integer(h) and w > 0 and h > 0 do
+    SSCMEx.Nif.image_resize(image, {w, h}, opts)
   end
 
   @doc """

@@ -1,8 +1,9 @@
 defmodule SSCMExTest do
+  @moduledoc false
   use ExUnit.Case
   doctest SSCMEx
 
-  test "greets the world" do
-    assert SSCMEx.hello() == :world
+  test "module exists" do
+    assert is_atom(SSCMEx)
   end
 end

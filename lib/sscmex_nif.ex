@@ -89,4 +89,8 @@ defmodule SSCMEx.Nif do
   def camera_set_ctrl(_camera_resource, _ctrl, _value), do: :erlang.nif_error(:nif_not_loaded)
   def camera_get_ctrl(_camera_resource, _ctrl), do: :erlang.nif_error(:nif_not_loaded)
   def camera_get_id(_camera_resource), do: :erlang.nif_error(:nif_not_loaded)
+
+  # Image processing functions
+  def image_convert(_image, _format, _opts), do: :erlang.nif_error(:nif_not_loaded)
+  def image_resize(_image, _dimensions, _opts), do: :erlang.nif_error(:nif_not_loaded)
 end
