@@ -60,7 +60,7 @@ defmodule SSCMEx.Camera do
           | :h265
           | :rgb888_planar
 
-  @type ctrl_type :: :window | :channel | :format | :fps
+  @type ctrl_type :: :window | :channel | :format | :fps | :quality
 
   @doc """
   Get a camera from the device by index.
@@ -266,6 +266,7 @@ defmodule SSCMEx.Camera do
   - `:channel` - Set channel index
   - `:format` - Set pixel format
   - `:fps` - Set frames per second
+  - `:quality` - Set JPEG encoding quality (1-99) on the JPEG encoder channel
 
   ## Examples
 
@@ -277,6 +278,9 @@ defmodule SSCMEx.Camera do
 
       # Set channel format using atom
       {:ok, :ok} = SSCMEx.Camera.set_ctrl(camera, :format, :jpeg)
+
+      # Set JPEG quality (1-99, higher = less compression)
+      {:ok, :ok} = SSCMEx.Camera.set_ctrl(camera, :quality, 75)
   """
   @spec set_ctrl(t(), ctrl_type(), term()) :: {:ok, :ok} | {:error, term()}
   def set_ctrl(%__MODULE__{resource: resource}, ctrl, value) do
@@ -291,6 +295,7 @@ defmodule SSCMEx.Camera do
   - `:channel` -> channel index integer
   - `:format` -> pixel format atom
   - `:fps` -> fps integer
+  - `:quality` -> not supported for reading (write-only)
 
   For channel-specific controls (`:window`, `:format`, `:fps`), this reads the
   currently selected channel. Use `set_ctrl(camera, :channel, idx)` first.

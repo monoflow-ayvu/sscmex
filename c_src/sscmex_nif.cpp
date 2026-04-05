@@ -15,6 +15,7 @@
 #include "sscma/core/model/ma_model_segmentor.h"
 #include "sscma/porting/ma_device.h"
 #include "sscma/porting/ma_camera.h"
+#include "app_ipcam_venc.h"
 
 #include <opencv2/opencv.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
@@ -1785,6 +1786,29 @@ static bool parse_camera_ctrl_type(ErlNifEnv* env, ERL_NIF_TERM term, Camera::Ct
 static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     auto* res = NifRes<CameraRes>::get(env, argv[0]);
     if (!res || !res->val || !res->val->camera) return make_error(env, "invalid_resource");
+
+    char ctrl_atom[32];
+    if (!enif_get_atom(env, argv[1], ctrl_atom, sizeof(ctrl_atom), ERL_NIF_LATIN1)) {
+        return make_error(env, "unsupported_ctrl");
+    }
+
+    if (strcmp(ctrl_atom, "quality") == 0) {
+        int quality;
+        if (!enif_get_int(env, argv[2], &quality)) {
+            return make_error(env, "invalid_quality_value");
+        }
+        if (quality < 1 || quality > 99) {
+            return make_error(env, "quality_out_of_range");
+        }
+
+        APP_JPEG_CODEC_PARAM_S jpeg_cfg{};
+        jpeg_cfg.quality = quality;
+        jpeg_cfg.MCUPerECS = 0;
+
+        CVI_S32 ret = app_ipcam_Venc_Jpeg_Param_Set(1, &jpeg_cfg);
+        return ret == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok"))
+                                  : make_error(env, "set_quality_failed");
+    }
 
     Camera::CtrlType ctrl;
     if (!parse_camera_ctrl_type(env, argv[1], &ctrl)) {

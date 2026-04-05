@@ -240,6 +240,9 @@ int app_ipcam_Venc_Init(APP_VENC_CHN_E VencIdx);
 int app_ipcam_Venc_Start(APP_VENC_CHN_E VencIdx);
 int app_ipcam_Venc_Stop(APP_VENC_CHN_E VencIdx);
 
+/* Set JPEG encoder quality (1-99) on a VENC channel. */
+CVI_S32 app_ipcam_Venc_Jpeg_Param_Set(VENC_CHN VencChn, APP_JPEG_CODEC_PARAM_S *pstJpegCodecCfg);
+
 #ifdef __cplusplus
 }
 #endif
