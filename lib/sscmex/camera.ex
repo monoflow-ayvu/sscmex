@@ -60,7 +60,23 @@ defmodule SSCMEx.Camera do
           | :h265
           | :rgb888_planar
 
-  @type ctrl_type :: :window | :channel | :format | :fps | :quality
+  @type ctrl_type ::
+          :window
+          | :channel
+          | :format
+          | :fps
+          | :quality
+          | :ae_mode
+          | :max_iso
+          | :exposure_us
+          | :gain
+          | :exposure_range
+          | :tnr_enable
+          | :tnr_strength
+          | :brightness
+          | :contrast
+          | :saturation
+          | :sharpness
 
   @doc """
   Get a camera from the device by index.
