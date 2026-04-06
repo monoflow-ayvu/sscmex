@@ -261,12 +261,31 @@ defmodule SSCMEx.Camera do
   @doc """
   Set a camera control value.
 
-  ## Control Types
+  ## Standard Controls
   - `:window` - Set resolution `{width, height}`
   - `:channel` - Set channel index
   - `:format` - Set pixel format
   - `:fps` - Set frames per second
-  - `:quality` - Set JPEG encoding quality (1-99) on the JPEG encoder channel
+  - `:quality` - Set JPEG encoding quality (1-99, value 50 is reserved)
+
+  ## ISP Controls (requires `isp_available?/0` to return `true`)
+
+  ### AE (Auto-Exposure) Controls
+  - `:ae_mode` - Set AE mode (`:auto` or `:manual`)
+  - `:max_iso` - Set maximum ISO for auto-exposure (100-12800)
+  - `:exposure_us` - Set manual exposure time in microseconds (1-1000000)
+  - `:gain` - Set manual analog gain, 10-bit precision (1024=1x, 2048=2x, range 1024-65536)
+  - `:exposure_range` - Set auto-exposure time limits `{min_us, max_us}` (1-1000000)
+
+  ### TNR (Temporal Noise Reduction) Controls
+  - `:tnr_enable` - Enable/disable 3D noise reduction (`true` or `false`)
+  - `:tnr_strength` - Set TNR intensity (0-255, manual mode)
+
+  ### Image Tuning Controls
+  - `:brightness` - Set image brightness (0-255, default 128)
+  - `:contrast` - Set image contrast (0-255, default 128)
+  - `:saturation` - Set color saturation (0-255, default 128)
+  - `:sharpness` - Set edge sharpness (0-255)
 
   ## Examples
 
@@ -276,11 +295,17 @@ defmodule SSCMEx.Camera do
       # Set FPS
       {:ok, :ok} = SSCMEx.Camera.set_ctrl(camera, :fps, 15)
 
-      # Set channel format using atom
-      {:ok, :ok} = SSCMEx.Camera.set_ctrl(camera, :format, :jpeg)
-
       # Set JPEG quality (1-99, higher = less compression)
       {:ok, :ok} = SSCMEx.Camera.set_ctrl(camera, :quality, 75)
+
+      # Limit max ISO to reduce noise in low light
+      {:ok, :ok} = SSCMEx.Camera.set_ctrl(camera, :max_iso, 800)
+
+      # Enable 3D noise reduction
+      {:ok, :ok} = SSCMEx.Camera.set_ctrl(camera, :tnr_enable, true)
+
+      # Increase brightness slightly
+      {:ok, :ok} = SSCMEx.Camera.set_ctrl(camera, :brightness, 140)
   """
   @spec set_ctrl(t(), ctrl_type(), term()) :: {:ok, :ok} | {:error, term()}
   def set_ctrl(%__MODULE__{resource: resource}, ctrl, value) do
@@ -291,11 +316,26 @@ defmodule SSCMEx.Camera do
   Get a camera control value.
 
   ## Control Types and return values
+
+  ### Standard Controls
   - `:window` -> `{width, height}`
   - `:channel` -> channel index integer
   - `:format` -> pixel format atom
   - `:fps` -> fps integer
   - `:quality` -> quality integer (1-99, value 50 is reserved)
+
+  ### ISP Controls
+  - `:ae_mode` -> `:auto` or `:manual`
+  - `:max_iso` -> maximum ISO integer (100-12800)
+  - `:exposure_us` -> current exposure time in microseconds
+  - `:gain` -> current analog gain (10-bit: 1024=1x)
+  - `:exposure_range` -> `{min_us, max_us}` tuple
+  - `:tnr_enable` -> `true` or `false`
+  - `:tnr_strength` -> TNR strength integer (0-255)
+  - `:brightness` -> brightness integer (0-255)
+  - `:contrast` -> contrast integer (0-255)
+  - `:saturation` -> saturation integer (0-255)
+  - `:sharpness` -> sharpness integer (0-255)
 
   For channel-specific controls (`:window`, `:format`, `:fps`), this reads the
   currently selected channel. Use `set_ctrl(camera, :channel, idx)` first.
@@ -303,6 +343,9 @@ defmodule SSCMEx.Camera do
   ## Examples
 
       {:ok, quality} = SSCMEx.Camera.get_ctrl(camera, :quality)
+      {:ok, :auto} = SSCMEx.Camera.get_ctrl(camera, :ae_mode)
+      {:ok, {min_us, max_us}} = SSCMEx.Camera.get_ctrl(camera, :exposure_range)
+      {:ok, 800} = SSCMEx.Camera.get_ctrl(camera, :max_iso)
   """
   @spec get_ctrl(t(), ctrl_type()) :: {:ok, term()} | {:error, term()}
   def get_ctrl(%__MODULE__{resource: resource}, ctrl) do
