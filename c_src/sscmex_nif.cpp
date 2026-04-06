@@ -1814,6 +1814,128 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
                                   : make_error(env, "set_quality_failed");
     }
 
+    // --- AE Controls ---
+    if (strcmp(ctrl_atom, "ae_mode") == 0) {
+        char mode_atom[16];
+        if (!enif_get_atom(env, argv[2], mode_atom, sizeof(mode_atom), ERL_NIF_LATIN1))
+            return make_error(env, "invalid_mode");
+        ISP_EXPOSURE_ATTR_S attr;
+        if (CVI_ISP_GetExposureAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "ae_unavailable");
+        if (strcmp(mode_atom, "auto") == 0) attr.enOpType = OP_TYPE_AUTO;
+        else if (strcmp(mode_atom, "manual") == 0) attr.enOpType = OP_TYPE_MANUAL;
+        else return make_error(env, "invalid_mode");
+        return CVI_ISP_SetExposureAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_ae_mode_failed");
+    }
+
+    if (strcmp(ctrl_atom, "max_iso") == 0) {
+        int val;
+        if (!enif_get_int(env, argv[2], &val)) return make_error(env, "invalid_iso");
+        if (val < 100 || val > 12800) return make_error(env, "iso_out_of_range");
+        ISP_EXPOSURE_ATTR_S attr;
+        if (CVI_ISP_GetExposureAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "ae_unavailable");
+        attr.enOpType = OP_TYPE_AUTO;
+        attr.stAuto.enGainType = AE_TYPE_ISO;
+        attr.stAuto.stISONumRange.u32Max = static_cast<CVI_U32>(val);
+        return CVI_ISP_SetExposureAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_max_iso_failed");
+    }
+
+    if (strcmp(ctrl_atom, "exposure_us") == 0) {
+        int val;
+        if (!enif_get_int(env, argv[2], &val)) return make_error(env, "invalid_exposure");
+        if (val < 1 || val > 1000000) return make_error(env, "exposure_out_of_range");
+        ISP_EXPOSURE_ATTR_S attr;
+        if (CVI_ISP_GetExposureAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "ae_unavailable");
+        attr.enOpType = OP_TYPE_MANUAL;
+        attr.stManual.enExpTimeOpType = OP_TYPE_MANUAL;
+        attr.stManual.u32ExpTime = static_cast<CVI_U32>(val);
+        return CVI_ISP_SetExposureAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_exposure_failed");
+    }
+
+    if (strcmp(ctrl_atom, "gain") == 0) {
+        int val;
+        if (!enif_get_int(env, argv[2], &val)) return make_error(env, "invalid_gain");
+        if (val < 1024 || val > 65536) return make_error(env, "gain_out_of_range");
+        ISP_EXPOSURE_ATTR_S attr;
+        if (CVI_ISP_GetExposureAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "ae_unavailable");
+        attr.enOpType = OP_TYPE_MANUAL;
+        attr.stManual.enAGainOpType = OP_TYPE_MANUAL;
+        attr.stManual.u32AGain = static_cast<CVI_U32>(val);
+        attr.stManual.u32DGain = 1024;
+        attr.stManual.u32ISPDGain = 1024;
+        return CVI_ISP_SetExposureAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_gain_failed");
+    }
+
+    if (strcmp(ctrl_atom, "exposure_range") == 0) {
+        int arity;
+        const ERL_NIF_TERM* tuple;
+        if (!enif_get_tuple(env, argv[2], &arity, &tuple) || arity != 2)
+            return make_error(env, "invalid_range_tuple");
+        int min_us, max_us;
+        if (!enif_get_int(env, tuple[0], &min_us) || !enif_get_int(env, tuple[1], &max_us))
+            return make_error(env, "invalid_range_tuple");
+        if (min_us < 1 || max_us < min_us || max_us > 1000000)
+            return make_error(env, "exposure_out_of_range");
+        ISP_EXPOSURE_ATTR_S attr;
+        if (CVI_ISP_GetExposureAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "ae_unavailable");
+        attr.enOpType = OP_TYPE_AUTO;
+        attr.stAuto.stExpTimeRange.u32Min = static_cast<CVI_U32>(min_us);
+        attr.stAuto.stExpTimeRange.u32Max = static_cast<CVI_U32>(max_us);
+        return CVI_ISP_SetExposureAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_exposure_range_failed");
+    }
+
+    // --- TNR Controls ---
+    if (strcmp(ctrl_atom, "tnr_enable") == 0) {
+        char bool_atom[8];
+        if (!enif_get_atom(env, argv[2], bool_atom, sizeof(bool_atom), ERL_NIF_LATIN1))
+            return make_error(env, "invalid_boolean");
+        ISP_TNR_ATTR_S attr;
+        if (CVI_ISP_GetTNRAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "tnr_unavailable");
+        if (strcmp(bool_atom, "true") == 0) attr.Enable = CVI_TRUE;
+        else if (strcmp(bool_atom, "false") == 0) attr.Enable = CVI_FALSE;
+        else return make_error(env, "invalid_boolean");
+        return CVI_ISP_SetTNRAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_tnr_failed");
+    }
+
+    if (strcmp(ctrl_atom, "tnr_strength") == 0) {
+        int val;
+        if (!enif_get_int(env, argv[2], &val)) return make_error(env, "invalid_strength");
+        if (val < 0 || val > 255) return make_error(env, "strength_out_of_range");
+        ISP_TNR_ATTR_S attr;
+        if (CVI_ISP_GetTNRAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "tnr_unavailable");
+        attr.enOpType = OP_TYPE_MANUAL;
+        attr.stManual.TnrStrength0 = static_cast<CVI_U8>(val);
+        return CVI_ISP_SetTNRAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_tnr_strength_failed");
+    }
+
+    // --- Image Tuning Controls ---
+    if (strcmp(ctrl_atom, "brightness") == 0) {
+        int val;
+        if (!enif_get_int(env, argv[2], &val)) return make_error(env, "invalid_value");
+        if (val < 0 || val > 255) return make_error(env, "value_out_of_range");
+        return CVI_ISP_SetBrightness(0, static_cast<CVI_U8>(val)) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_brightness_failed");
+    }
+
+    if (strcmp(ctrl_atom, "contrast") == 0) {
+        int val;
+        if (!enif_get_int(env, argv[2], &val)) return make_error(env, "invalid_value");
+        if (val < 0 || val > 255) return make_error(env, "value_out_of_range");
+        return CVI_ISP_SetContrast(0, static_cast<CVI_U8>(val)) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_contrast_failed");
+    }
+
+    if (strcmp(ctrl_atom, "saturation") == 0) {
+        int val;
+        if (!enif_get_int(env, argv[2], &val)) return make_error(env, "invalid_value");
+        if (val < 0 || val > 255) return make_error(env, "value_out_of_range");
+        return CVI_ISP_SetSaturation(0, static_cast<CVI_U8>(val)) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_saturation_failed");
+    }
+
+    if (strcmp(ctrl_atom, "sharpness") == 0) {
+        int val;
+        if (!enif_get_int(env, argv[2], &val)) return make_error(env, "invalid_value");
+        if (val < 0 || val > 255) return make_error(env, "value_out_of_range");
+        return CVI_ISP_SetSharpness(0, static_cast<CVI_U8>(val)) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_sharpness_failed");
+    }
+
     Camera::CtrlType ctrl;
     if (!parse_camera_ctrl_type(env, argv[1], &ctrl)) {
         return make_error(env, "unsupported_ctrl");
@@ -1873,6 +1995,80 @@ static ERL_NIF_TERM camera_get_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
             return make_error(env, "quality_unavailable");
         }
         return make_ok(env, enif_make_int(env, static_cast<int>(jpeg_param.u32Qfactor)));
+    }
+
+    // --- AE Controls ---
+    if (strcmp(ctrl_atom, "ae_mode") == 0) {
+        ISP_EXPOSURE_ATTR_S attr;
+        if (CVI_ISP_GetExposureAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "ae_unavailable");
+        return make_ok(env, make_atom(env, attr.enOpType == OP_TYPE_AUTO ? "auto" : "manual"));
+    }
+
+    if (strcmp(ctrl_atom, "max_iso") == 0) {
+        ISP_EXPOSURE_ATTR_S attr;
+        if (CVI_ISP_GetExposureAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "ae_unavailable");
+        if (attr.stAuto.enGainType == AE_TYPE_ISO)
+            return make_ok(env, enif_make_int(env, static_cast<int>(attr.stAuto.stISONumRange.u32Max)));
+        CVI_U32 gain = attr.stAuto.stSysGainRange.u32Max;
+        return make_ok(env, enif_make_int(env, (gain * 100) / 1024));
+    }
+
+    if (strcmp(ctrl_atom, "exposure_us") == 0) {
+        ISP_EXPOSURE_ATTR_S attr;
+        if (CVI_ISP_GetExposureAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "ae_unavailable");
+        return make_ok(env, enif_make_int(env, static_cast<int>(attr.stManual.u32ExpTime)));
+    }
+
+    if (strcmp(ctrl_atom, "gain") == 0) {
+        ISP_EXPOSURE_ATTR_S attr;
+        if (CVI_ISP_GetExposureAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "ae_unavailable");
+        return make_ok(env, enif_make_int(env, static_cast<int>(attr.stManual.u32AGain)));
+    }
+
+    if (strcmp(ctrl_atom, "exposure_range") == 0) {
+        ISP_EXPOSURE_ATTR_S attr;
+        if (CVI_ISP_GetExposureAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "ae_unavailable");
+        return make_ok(env, enif_make_tuple2(env,
+            enif_make_int(env, static_cast<int>(attr.stAuto.stExpTimeRange.u32Min)),
+            enif_make_int(env, static_cast<int>(attr.stAuto.stExpTimeRange.u32Max))));
+    }
+
+    // --- TNR Controls ---
+    if (strcmp(ctrl_atom, "tnr_enable") == 0) {
+        ISP_TNR_ATTR_S attr;
+        if (CVI_ISP_GetTNRAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "tnr_unavailable");
+        return make_ok(env, make_atom(env, attr.Enable ? "true" : "false"));
+    }
+
+    if (strcmp(ctrl_atom, "tnr_strength") == 0) {
+        ISP_TNR_ATTR_S attr;
+        if (CVI_ISP_GetTNRAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "tnr_unavailable");
+        return make_ok(env, enif_make_int(env, static_cast<int>(attr.stManual.TnrStrength0)));
+    }
+
+    // --- Image Tuning Controls ---
+    if (strcmp(ctrl_atom, "brightness") == 0) {
+        CVI_U8 val;
+        if (CVI_ISP_GetBrightness(0, &val) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
+        return make_ok(env, enif_make_int(env, static_cast<int>(val)));
+    }
+
+    if (strcmp(ctrl_atom, "contrast") == 0) {
+        CVI_U8 val;
+        if (CVI_ISP_GetContrast(0, &val) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
+        return make_ok(env, enif_make_int(env, static_cast<int>(val)));
+    }
+
+    if (strcmp(ctrl_atom, "saturation") == 0) {
+        CVI_U8 val;
+        if (CVI_ISP_GetSaturation(0, &val) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
+        return make_ok(env, enif_make_int(env, static_cast<int>(val)));
+    }
+
+    if (strcmp(ctrl_atom, "sharpness") == 0) {
+        CVI_U8 val;
+        if (CVI_ISP_GetSharpness(0, &val) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
+        return make_ok(env, enif_make_int(env, static_cast<int>(val)));
     }
 
     Camera::CtrlType ctrl;
