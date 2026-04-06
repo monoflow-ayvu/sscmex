@@ -93,4 +93,7 @@ defmodule SSCMEx.Nif do
   # Image processing functions
   def image_convert(_image, _format, _opts), do: :erlang.nif_error(:nif_not_loaded)
   def image_resize(_image, _dimensions, _opts), do: :erlang.nif_error(:nif_not_loaded)
+
+  # ISP functions
+  def isp_available, do: :erlang.nif_error(:nif_not_loaded)
 end

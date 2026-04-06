@@ -320,4 +320,22 @@ defmodule SSCMEx.Camera do
   def get_id(%__MODULE__{resource: resource}) do
     SSCMEx.Nif.camera_get_id(resource)
   end
+
+  @doc """
+  Check if the ISP (Image Signal Processor) is available.
+
+  Probes the ISP by attempting to read exposure attributes on pipe 0.
+
+  ## Examples
+
+      {:ok, true} = SSCMEx.Camera.isp_available()
+  """
+  @spec isp_available() :: {:ok, boolean()} | {:error, term()}
+  def isp_available do
+    case SSCMEx.Nif.isp_available() do
+      {:ok, true} -> {:ok, true}
+      {:ok, false} -> {:ok, false}
+      error -> error
+    end
+  end
 end

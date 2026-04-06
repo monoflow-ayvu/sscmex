@@ -16,6 +16,8 @@
 #include "sscma/porting/ma_device.h"
 #include "sscma/porting/ma_camera.h"
 #include "app_ipcam_venc.h"
+#include <cvi_isp.h>
+#include <cvi_ae.h>
 
 #include <opencv2/opencv.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
@@ -1904,6 +1906,13 @@ static ERL_NIF_TERM camera_get_id(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
 }
 
 // NIF function table
+static ERL_NIF_TERM isp_available(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    ISP_EXPOSURE_ATTR_S attr;
+    CVI_S32 ret = CVI_ISP_GetExposureAttr(0, &attr);
+    return ret == CVI_SUCCESS ? make_ok(env, make_atom(env, "true"))
+                              : make_ok(env, make_atom(env, "false"));
+}
+
 static ErlNifFunc nif_functions[] = {
     // Engine functions
     {"engine_cvi_new", 0, engine_cvi_new, 0},
@@ -1959,6 +1968,9 @@ static ErlNifFunc nif_functions[] = {
     // Image processing functions
     {"image_convert", 3, image_convert, ERL_NIF_DIRTY_JOB_CPU_BOUND},
     {"image_resize", 3, image_resize, ERL_NIF_DIRTY_JOB_CPU_BOUND},
+
+    // ISP functions
+    {"isp_available", 0, isp_available, 0},
 };
 
 // NIF initialization - register resource type
