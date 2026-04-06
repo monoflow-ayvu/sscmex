@@ -1956,6 +1956,42 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         return CVI_ISP_SetSharpenAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_sharpness_failed");
     }
 
+    // Raw (Bayer) NR strength: via ISP NR module (stManual.NoiseSuppressStr)
+    if (strcmp(ctrl_atom, "nr_strength") == 0) {
+        int val;
+        if (!enif_get_int(env, argv[2], &val)) return make_error(env, "invalid_value");
+        if (val < 0 || val > 255) return make_error(env, "value_out_of_range");
+        ISP_NR_ATTR_S attr;
+        if (CVI_ISP_GetNRAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
+        attr.enOpType = OP_TYPE_MANUAL;
+        attr.stManual.NoiseSuppressStr = static_cast<CVI_U8>(val);
+        return CVI_ISP_SetNRAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_nr_strength_failed");
+    }
+
+    // Luma NR strength: via ISP YNR module (stManual.NoiseSuppressStr)
+    if (strcmp(ctrl_atom, "ynr_strength") == 0) {
+        int val;
+        if (!enif_get_int(env, argv[2], &val)) return make_error(env, "invalid_value");
+        if (val < 0 || val > 255) return make_error(env, "value_out_of_range");
+        ISP_YNR_ATTR_S attr;
+        if (CVI_ISP_GetYNRAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
+        attr.enOpType = OP_TYPE_MANUAL;
+        attr.stManual.NoiseSuppressStr = static_cast<CVI_U8>(val);
+        return CVI_ISP_SetYNRAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_ynr_strength_failed");
+    }
+
+    // Chroma NR strength: via ISP CNR module (stManual.NoiseSuppressStr)
+    if (strcmp(ctrl_atom, "cnr_strength") == 0) {
+        int val;
+        if (!enif_get_int(env, argv[2], &val)) return make_error(env, "invalid_value");
+        if (val < 0 || val > 255) return make_error(env, "value_out_of_range");
+        ISP_CNR_ATTR_S attr;
+        if (CVI_ISP_GetCNRAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
+        attr.enOpType = OP_TYPE_MANUAL;
+        attr.stManual.NoiseSuppressStr = static_cast<CVI_U8>(val);
+        return CVI_ISP_SetCNRAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_cnr_strength_failed");
+    }
+
     Camera::CtrlType ctrl;
     if (!parse_camera_ctrl_type(env, argv[1], &ctrl)) {
         return make_error(env, "unsupported_ctrl");
@@ -2007,8 +2043,11 @@ static ERL_NIF_TERM camera_get_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
     if (!res || !res->val || !res->val->camera) return make_error(env, "invalid_resource");
 
     char ctrl_atom[32];
-    if (enif_get_atom(env, argv[1], ctrl_atom, sizeof(ctrl_atom), ERL_NIF_LATIN1) &&
-        strcmp(ctrl_atom, "quality") == 0) {
+    if (!enif_get_atom(env, argv[1], ctrl_atom, sizeof(ctrl_atom), ERL_NIF_LATIN1)) {
+        return make_error(env, "unsupported_ctrl");
+    }
+
+    if (strcmp(ctrl_atom, "quality") == 0) {
         VENC_JPEG_PARAM_S jpeg_param{};
         CVI_S32 ret = CVI_VENC_GetJpegParam(1, &jpeg_param);
         if (ret != CVI_SUCCESS) {
@@ -2093,6 +2132,27 @@ static ERL_NIF_TERM camera_get_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         ISP_SHARPEN_ATTR_S attr;
         if (CVI_ISP_GetSharpenAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
         return make_ok(env, enif_make_int(env, static_cast<int>(attr.stManual.GlobalGain)));
+    }
+
+    // Raw (Bayer) NR strength: read from ISP_NR_ATTR_S.stManual.NoiseSuppressStr
+    if (strcmp(ctrl_atom, "nr_strength") == 0) {
+        ISP_NR_ATTR_S attr;
+        if (CVI_ISP_GetNRAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
+        return make_ok(env, enif_make_int(env, static_cast<int>(attr.stManual.NoiseSuppressStr)));
+    }
+
+    // Luma NR strength: read from ISP_YNR_ATTR_S.stManual.NoiseSuppressStr
+    if (strcmp(ctrl_atom, "ynr_strength") == 0) {
+        ISP_YNR_ATTR_S attr;
+        if (CVI_ISP_GetYNRAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
+        return make_ok(env, enif_make_int(env, static_cast<int>(attr.stManual.NoiseSuppressStr)));
+    }
+
+    // Chroma NR strength: read from ISP_CNR_ATTR_S.stManual.NoiseSuppressStr
+    if (strcmp(ctrl_atom, "cnr_strength") == 0) {
+        ISP_CNR_ATTR_S attr;
+        if (CVI_ISP_GetCNRAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
+        return make_ok(env, enif_make_int(env, static_cast<int>(attr.stManual.NoiseSuppressStr)));
     }
 
     Camera::CtrlType ctrl;

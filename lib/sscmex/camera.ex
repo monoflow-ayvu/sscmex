@@ -77,6 +77,9 @@ defmodule SSCMEx.Camera do
           | :contrast
           | :saturation
           | :sharpness
+          | :nr_strength
+          | :ynr_strength
+          | :cnr_strength
 
   @doc """
   Get a camera from the device by index.
@@ -298,10 +301,15 @@ defmodule SSCMEx.Camera do
   - `:tnr_strength` - Set TNR intensity (0-255, manual mode)
 
   ### Image Tuning Controls
-  - `:brightness` - Set image brightness (0-255, default 128)
-  - `:contrast` - Set image contrast (0-255, default 128)
-  - `:saturation` - Set color saturation (0-255, default 128)
-  - `:sharpness` - Set edge sharpness (0-255)
+  - `:brightness` - Set image brightness via YContrast CenterLuma (0-255)
+  - `:contrast` - Set image contrast via YContrast ContrastHigh (0-255)
+  - `:saturation` - Set color saturation (0-255)
+  - `:sharpness` - Set edge sharpness via Sharpen GlobalGain (0-255)
+
+  ### Noise Reduction Controls
+  - `:nr_strength` - Raw/Bayer spatial NR strength (0-255); higher = less grain
+  - `:ynr_strength` - Luma NR strength post-demosaic (0-255); reduces luma noise
+  - `:cnr_strength` - Chroma NR strength (0-255); reduces color noise/fringing
 
   ## Examples
 
@@ -352,6 +360,9 @@ defmodule SSCMEx.Camera do
   - `:contrast` -> contrast integer (0-255)
   - `:saturation` -> saturation integer (0-255)
   - `:sharpness` -> sharpness integer (0-255)
+  - `:nr_strength` -> raw/Bayer NR strength integer (0-255)
+  - `:ynr_strength` -> luma NR strength integer (0-255)
+  - `:cnr_strength` -> chroma NR strength integer (0-255)
 
   For channel-specific controls (`:window`, `:format`, `:fps`), this reads the
   currently selected channel. Use `set_ctrl(camera, :channel, idx)` first.
