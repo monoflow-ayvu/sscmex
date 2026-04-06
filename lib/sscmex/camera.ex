@@ -295,10 +295,14 @@ defmodule SSCMEx.Camera do
   - `:channel` -> channel index integer
   - `:format` -> pixel format atom
   - `:fps` -> fps integer
-  - `:quality` -> not supported for reading (write-only)
+  - `:quality` -> quality integer (1-99, value 50 is reserved)
 
   For channel-specific controls (`:window`, `:format`, `:fps`), this reads the
   currently selected channel. Use `set_ctrl(camera, :channel, idx)` first.
+
+  ## Examples
+
+      {:ok, quality} = SSCMEx.Camera.get_ctrl(camera, :quality)
   """
   @spec get_ctrl(t(), ctrl_type()) :: {:ok, term()} | {:error, term()}
   def get_ctrl(%__MODULE__{resource: resource}, ctrl) do

@@ -1797,15 +1797,17 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         if (!enif_get_int(env, argv[2], &quality)) {
             return make_error(env, "invalid_quality_value");
         }
-        if (quality < 1 || quality > 99) {
+        if (quality < 1 || quality == 50 || quality > 99) {
             return make_error(env, "quality_out_of_range");
         }
 
-        APP_JPEG_CODEC_PARAM_S jpeg_cfg{};
-        jpeg_cfg.quality = quality;
-        jpeg_cfg.MCUPerECS = 0;
-
-        CVI_S32 ret = app_ipcam_Venc_Jpeg_Param_Set(1, &jpeg_cfg);
+        VENC_JPEG_PARAM_S jpeg_param{};
+        CVI_S32 ret = CVI_VENC_GetJpegParam(1, &jpeg_param);
+        if (ret != CVI_SUCCESS) {
+            return make_error(env, "quality_unavailable");
+        }
+        jpeg_param.u32Qfactor = static_cast<CVI_U32>(quality);
+        ret = CVI_VENC_SetJpegParam(1, &jpeg_param);
         return ret == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok"))
                                   : make_error(env, "set_quality_failed");
     }
@@ -1859,6 +1861,17 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
 static ERL_NIF_TERM camera_get_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     auto* res = NifRes<CameraRes>::get(env, argv[0]);
     if (!res || !res->val || !res->val->camera) return make_error(env, "invalid_resource");
+
+    char ctrl_atom[32];
+    if (enif_get_atom(env, argv[1], ctrl_atom, sizeof(ctrl_atom), ERL_NIF_LATIN1) &&
+        strcmp(ctrl_atom, "quality") == 0) {
+        VENC_JPEG_PARAM_S jpeg_param{};
+        CVI_S32 ret = CVI_VENC_GetJpegParam(1, &jpeg_param);
+        if (ret != CVI_SUCCESS) {
+            return make_error(env, "quality_unavailable");
+        }
+        return make_ok(env, enif_make_int(env, static_cast<int>(jpeg_param.u32Qfactor)));
+    }
 
     Camera::CtrlType ctrl;
     if (!parse_camera_ctrl_type(env, argv[1], &ctrl)) {
