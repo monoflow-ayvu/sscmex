@@ -1908,32 +1908,52 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
     }
 
     // --- Image Tuning Controls ---
+    // Brightness: via ISP YContrast module (CenterLuma in stManual)
     if (strcmp(ctrl_atom, "brightness") == 0) {
         int val;
         if (!enif_get_int(env, argv[2], &val)) return make_error(env, "invalid_value");
         if (val < 0 || val > 255) return make_error(env, "value_out_of_range");
-        return CVI_ISP_SetBrightness(0, static_cast<CVI_U8>(val)) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_brightness_failed");
+        ISP_YCONTRAST_ATTR_S attr;
+        if (CVI_ISP_GetYContrastAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
+        attr.enOpType = OP_TYPE_MANUAL;
+        attr.stManual.CenterLuma = static_cast<CVI_U8>(val);
+        return CVI_ISP_SetYContrastAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_brightness_failed");
     }
 
+    // Contrast: via ISP YContrast module (ContrastHigh in stManual)
     if (strcmp(ctrl_atom, "contrast") == 0) {
         int val;
         if (!enif_get_int(env, argv[2], &val)) return make_error(env, "invalid_value");
         if (val < 0 || val > 255) return make_error(env, "value_out_of_range");
-        return CVI_ISP_SetContrast(0, static_cast<CVI_U8>(val)) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_contrast_failed");
+        ISP_YCONTRAST_ATTR_S attr;
+        if (CVI_ISP_GetYContrastAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
+        attr.enOpType = OP_TYPE_MANUAL;
+        attr.stManual.ContrastHigh = static_cast<CVI_U8>(val);
+        return CVI_ISP_SetYContrastAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_contrast_failed");
     }
 
+    // Saturation: via ISP Saturation module (stManual.Saturation)
     if (strcmp(ctrl_atom, "saturation") == 0) {
         int val;
         if (!enif_get_int(env, argv[2], &val)) return make_error(env, "invalid_value");
         if (val < 0 || val > 255) return make_error(env, "value_out_of_range");
-        return CVI_ISP_SetSaturation(0, static_cast<CVI_U8>(val)) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_saturation_failed");
+        ISP_SATURATION_ATTR_S attr;
+        if (CVI_ISP_GetSaturationAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
+        attr.enOpType = OP_TYPE_MANUAL;
+        attr.stManual.Saturation = static_cast<CVI_U8>(val);
+        return CVI_ISP_SetSaturationAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_saturation_failed");
     }
 
+    // Sharpness: via ISP Sharpen module (stManual.GlobalGain)
     if (strcmp(ctrl_atom, "sharpness") == 0) {
         int val;
         if (!enif_get_int(env, argv[2], &val)) return make_error(env, "invalid_value");
         if (val < 0 || val > 255) return make_error(env, "value_out_of_range");
-        return CVI_ISP_SetSharpness(0, static_cast<CVI_U8>(val)) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_sharpness_failed");
+        ISP_SHARPEN_ATTR_S attr;
+        if (CVI_ISP_GetSharpenAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
+        attr.enOpType = OP_TYPE_MANUAL;
+        attr.stManual.GlobalGain = static_cast<CVI_U8>(val);
+        return CVI_ISP_SetSharpenAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_sharpness_failed");
     }
 
     Camera::CtrlType ctrl;
@@ -2047,28 +2067,32 @@ static ERL_NIF_TERM camera_get_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
     }
 
     // --- Image Tuning Controls ---
+    // Brightness: read from ISP_YCONTRAST_ATTR_S.stManual.CenterLuma
     if (strcmp(ctrl_atom, "brightness") == 0) {
-        CVI_U8 val;
-        if (CVI_ISP_GetBrightness(0, &val) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
-        return make_ok(env, enif_make_int(env, static_cast<int>(val)));
+        ISP_YCONTRAST_ATTR_S attr;
+        if (CVI_ISP_GetYContrastAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
+        return make_ok(env, enif_make_int(env, static_cast<int>(attr.stManual.CenterLuma)));
     }
 
+    // Contrast: read from ISP_YCONTRAST_ATTR_S.stManual.ContrastHigh
     if (strcmp(ctrl_atom, "contrast") == 0) {
-        CVI_U8 val;
-        if (CVI_ISP_GetContrast(0, &val) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
-        return make_ok(env, enif_make_int(env, static_cast<int>(val)));
+        ISP_YCONTRAST_ATTR_S attr;
+        if (CVI_ISP_GetYContrastAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
+        return make_ok(env, enif_make_int(env, static_cast<int>(attr.stManual.ContrastHigh)));
     }
 
+    // Saturation: read from ISP_SATURATION_ATTR_S.stManual.Saturation
     if (strcmp(ctrl_atom, "saturation") == 0) {
-        CVI_U8 val;
-        if (CVI_ISP_GetSaturation(0, &val) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
-        return make_ok(env, enif_make_int(env, static_cast<int>(val)));
+        ISP_SATURATION_ATTR_S attr;
+        if (CVI_ISP_GetSaturationAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
+        return make_ok(env, enif_make_int(env, static_cast<int>(attr.stManual.Saturation)));
     }
 
+    // Sharpness: read from ISP_SHARPEN_ATTR_S.stManual.GlobalGain
     if (strcmp(ctrl_atom, "sharpness") == 0) {
-        CVI_U8 val;
-        if (CVI_ISP_GetSharpness(0, &val) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
-        return make_ok(env, enif_make_int(env, static_cast<int>(val)));
+        ISP_SHARPEN_ATTR_S attr;
+        if (CVI_ISP_GetSharpenAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
+        return make_ok(env, enif_make_int(env, static_cast<int>(attr.stManual.GlobalGain)));
     }
 
     Camera::CtrlType ctrl;
