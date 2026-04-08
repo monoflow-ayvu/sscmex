@@ -71,6 +71,7 @@ defmodule SSCMEx.Camera do
           | :exposure_us
           | :gain
           | :exposure_range
+          | :max_exposure_us
           | :tnr_enable
           | :tnr_strength
           | :brightness
@@ -358,6 +359,7 @@ defmodule SSCMEx.Camera do
   - `:exposure_us` - Set manual exposure time in microseconds (1-1000000)
   - `:gain` - Set manual analog gain, 10-bit precision (1024=1x, 2048=2x, range 1024-65536)
   - `:exposure_range` - Set auto-exposure time limits `{min_us, max_us}` (1-1000000)
+  - `:max_exposure_us` - Cap auto-exposure max shutter time in microseconds (1-1000000)
 
   ### TNR (Temporal Noise Reduction) Controls
   - `:tnr_enable` - Enable/disable 3D noise reduction (`true` or `false`)
@@ -417,6 +419,7 @@ defmodule SSCMEx.Camera do
   - `:exposure_us` -> current exposure time in microseconds
   - `:gain` -> current analog gain (10-bit: 1024=1x)
   - `:exposure_range` -> `{min_us, max_us}` tuple
+  - `:max_exposure_us` -> max auto-exposure shutter cap in microseconds
   - `:tnr_enable` -> `true` or `false`
   - `:tnr_strength` -> TNR strength integer (0-255)
   - `:brightness` -> brightness integer (0-255)

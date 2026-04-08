@@ -1851,7 +1851,6 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         if (val < 100 || val > 12800) return make_error(env, "iso_out_of_range");
         ISP_EXPOSURE_ATTR_S attr;
         if (CVI_ISP_GetExposureAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "ae_unavailable");
-        attr.enOpType = OP_TYPE_AUTO;
         attr.stAuto.enGainType = AE_TYPE_ISO;
         attr.stAuto.stISONumRange.u32Max = static_cast<CVI_U32>(val);
         return CVI_ISP_SetExposureAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_max_iso_failed");
@@ -1899,6 +1898,18 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         attr.stAuto.stExpTimeRange.u32Min = static_cast<CVI_U32>(min_us);
         attr.stAuto.stExpTimeRange.u32Max = static_cast<CVI_U32>(max_us);
         return CVI_ISP_SetExposureAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_exposure_range_failed");
+    }
+
+    if (strcmp(ctrl_atom, "max_exposure_us") == 0) {
+        int val;
+        if (!enif_get_int(env, argv[2], &val)) return make_error(env, "invalid_exposure");
+        if (val < 1 || val > 1000000) return make_error(env, "exposure_out_of_range");
+        ISP_EXPOSURE_ATTR_S attr;
+        if (CVI_ISP_GetExposureAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "ae_unavailable");
+        if (static_cast<CVI_U32>(val) < attr.stAuto.stExpTimeRange.u32Min)
+            return make_error(env, "exposure_out_of_range");
+        attr.stAuto.stExpTimeRange.u32Max = static_cast<CVI_U32>(val);
+        return CVI_ISP_SetExposureAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_max_exposure_failed");
     }
 
     // --- TNR Controls ---
@@ -2112,6 +2123,12 @@ static ERL_NIF_TERM camera_get_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         return make_ok(env, enif_make_tuple2(env,
             enif_make_int(env, static_cast<int>(attr.stAuto.stExpTimeRange.u32Min)),
             enif_make_int(env, static_cast<int>(attr.stAuto.stExpTimeRange.u32Max))));
+    }
+
+    if (strcmp(ctrl_atom, "max_exposure_us") == 0) {
+        ISP_EXPOSURE_ATTR_S attr;
+        if (CVI_ISP_GetExposureAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "ae_unavailable");
+        return make_ok(env, enif_make_int(env, static_cast<int>(attr.stAuto.stExpTimeRange.u32Max)));
     }
 
     // --- TNR Controls ---
