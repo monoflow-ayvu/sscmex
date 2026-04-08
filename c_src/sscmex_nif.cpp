@@ -15,6 +15,7 @@
 #include "sscma/core/model/ma_model_segmentor.h"
 #include "sscma/porting/ma_device.h"
 #include "sscma/porting/ma_camera.h"
+#include "ma_camera_sg200x.h"
 #include "app_ipcam_venc.h"
 #include <cvi_isp.h>
 #include <cvi_ae.h>
@@ -698,8 +699,17 @@ static ERL_NIF_TERM image_convert(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
             encode_params.push_back(quality);
         }
 
+        // OpenCV's imencode expects BGR for multi-channel images.
+        // All input format branches above produce an RGB mat — convert before encoding.
+        ::cv::Mat encode_mat;
+        if (src_mat.channels() == 3) {
+            ::cv::cvtColor(src_mat, encode_mat, ::cv::COLOR_RGB2BGR);
+        } else {
+            encode_mat = src_mat;  // grayscale: single channel, no swap needed
+        }
+
         std::vector<uchar> encoded;
-        if (!::cv::imencode(ext, src_mat, encoded, encode_params)) {
+        if (!::cv::imencode(ext, encode_mat, encoded, encode_params)) {
             return make_error(env, "image_encoding_failed");
         }
 
@@ -1733,12 +1743,16 @@ static ERL_NIF_TERM camera_retrieve_frame(ErlNifEnv* env, int argc, const ERL_NI
     auto* res = NifRes<CameraRes>::get(env, argv[0]);
     if (!res || !res->val || !res->val->camera) return make_error(env, "invalid_resource");
 
-    // Get format atom
-    ma_pixel_format_t format = atom_to_pixel_format(env, argv[1]);
-    if (format == MA_PIXEL_FORMAT_UNKNOWN) return make_error(env, "invalid_format");
+    int channel_idx;
+    if (!enif_get_int(env, argv[1], &channel_idx))
+        return make_error(env, "invalid_channel");
+    if (channel_idx < 0 || channel_idx > 2)
+        return make_error(env, "channel_out_of_range");
 
     ma_img_t frame;
-    ma_err_t err = res->val->camera->retrieveFrame(frame, format);
+    // CameraRes always holds a CameraSG200X on this hardware.
+    auto* sg200x = static_cast<ma::CameraSG200X*>(res->val->camera);
+    ma_err_t err = sg200x->retrieveChannel(frame, channel_idx);
     if (err != MA_OK) {
         return make_error(env, "retrieve_frame_failed");
     }
@@ -1803,13 +1817,17 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
             return make_error(env, "quality_out_of_range");
         }
 
+        Camera::CtrlValue chn_val{};
+        res->val->camera->commandCtrl(Camera::kChannel, Camera::kRead, chn_val);
+        int jpeg_ch = chn_val.i32;
+
         VENC_JPEG_PARAM_S jpeg_param{};
-        CVI_S32 ret = CVI_VENC_GetJpegParam(1, &jpeg_param);
+        CVI_S32 ret = CVI_VENC_GetJpegParam(jpeg_ch, &jpeg_param);
         if (ret != CVI_SUCCESS) {
             return make_error(env, "quality_unavailable");
         }
         jpeg_param.u32Qfactor = static_cast<CVI_U32>(quality);
-        ret = CVI_VENC_SetJpegParam(1, &jpeg_param);
+        ret = CVI_VENC_SetJpegParam(jpeg_ch, &jpeg_param);
         return ret == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok"))
                                   : make_error(env, "set_quality_failed");
     }
@@ -2048,8 +2066,12 @@ static ERL_NIF_TERM camera_get_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
     }
 
     if (strcmp(ctrl_atom, "quality") == 0) {
+        Camera::CtrlValue chn_val{};
+        res->val->camera->commandCtrl(Camera::kChannel, Camera::kRead, chn_val);
+        int jpeg_ch = chn_val.i32;
+
         VENC_JPEG_PARAM_S jpeg_param{};
-        CVI_S32 ret = CVI_VENC_GetJpegParam(1, &jpeg_param);
+        CVI_S32 ret = CVI_VENC_GetJpegParam(jpeg_ch, &jpeg_param);
         if (ret != CVI_SUCCESS) {
             return make_error(env, "quality_unavailable");
         }

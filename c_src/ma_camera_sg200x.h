@@ -39,6 +39,7 @@ public:
     ma_err_t commandCtrl(CtrlType ctrl, CtrlMode mode, CtrlValue& value) noexcept override;
 
     ma_err_t retrieveFrame(ma_img_t& frame, ma_pixel_format_t format) noexcept override;
+    ma_err_t retrieveChannel(ma_img_t& frame, int channel_idx) noexcept;
     void returnFrame(ma_img_t& frame) noexcept override;
 
 private:

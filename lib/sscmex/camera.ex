@@ -29,8 +29,8 @@ defmodule SSCMEx.Camera do
         # Start streaming
         {:ok, :streaming} = SSCMEx.Camera.start_stream(camera, :refresh_on_return)
 
-        # Capture frame
-        {:ok, frame} = SSCMEx.Camera.retrieve_frame(camera, :rgb888)
+        # Capture frame from channel 0
+        {:ok, frame} = SSCMEx.Camera.retrieve_frame(camera, 0)
 
         # Stop streaming
         {:ok, :stopped} = SSCMEx.Camera.stop_stream(camera)
@@ -240,10 +240,11 @@ defmodule SSCMEx.Camera do
   - `:h265` - H.265 encoded video frame
 
   ## Channel selection
-  The native camera backend maps requested format to a channel:
-  - raw formats (`:rgb888`, `:rgb565`, `:yuv422`, `:gray`, `:rgb888_planar`) -> channel `0`
-  - `:jpeg` -> channel `1`
-  - `:h264` / `:h265` -> channel `2`
+
+  Use `configure_channel/3` before `start_stream/2` to assign a format and resolution
+  to each channel. Retrieve frames by channel index:
+
+      {:ok, frame} = SSCMEx.Camera.retrieve_frame(camera, 0)
 
   ## Returns
   Returns `%SSCMEx.Image{}`.
@@ -254,12 +255,12 @@ defmodule SSCMEx.Camera do
 
   ## Examples
 
-      {:ok, image} = SSCMEx.Camera.retrieve_frame(camera, :rgb888)
-      # image.data contains raw RGB888 pixels
+      {:ok, image} = SSCMEx.Camera.retrieve_frame(camera, 0)
+      # image.data contains pixels in the format configured for channel 0
   """
-  @spec retrieve_frame(t(), pixel_format()) :: {:ok, frame()} | {:error, term()}
-  def retrieve_frame(%__MODULE__{resource: resource}, format) do
-    case SSCMEx.Nif.camera_retrieve_frame(resource, format) do
+  @spec retrieve_frame(t(), 0..2) :: {:ok, frame()} | {:error, term()}
+  def retrieve_frame(%__MODULE__{resource: resource}, channel) do
+    case SSCMEx.Nif.camera_retrieve_frame(resource, channel) do
       {:ok, %{width: width, height: height, format: image_format, data: data} = frame_map} ->
         {:ok,
          %SSCMEx.Image{
@@ -274,6 +275,68 @@ defmodule SSCMEx.Camera do
 
       error ->
         error
+    end
+  end
+
+  @doc """
+  Configure a camera channel before `start_stream/2`.
+
+  Must be called after `init/2`. Attempting to change the format after the stream
+  has started returns `{:error, _}`.
+
+  ## Options
+
+  - `:format` - pixel format atom. Supported: `:rgb888`, `:yuv422`, `:gray`,
+    `:jpeg`, `:h264`, `:h265`, `:nv12`, `:nv21`. Note: `:rgb565` and
+    `:rgb888_planar` are not supported as native camera channel formats.
+  - `:width` and `:height` - frame dimensions (must both be provided together).
+  - `:fps` - target frame rate.
+
+  ## JPEG quality
+
+  Quality control (`set_ctrl(cam, :quality, value)`) applies to the channel that
+  is currently selected. Select the channel with `configure_channel/3` (which leaves
+  it as current) or `set_ctrl(cam, :channel, n)` before setting quality.
+
+  ## Examples
+
+      # Two RGB888 channels at different resolutions
+      :ok = Camera.configure_channel(cam, 0, format: :rgb888, width: 1920, height: 1080)
+      :ok = Camera.configure_channel(cam, 1, format: :rgb888, width: 640, height: 480)
+
+      # JPEG on channel 2
+      :ok = Camera.configure_channel(cam, 2, format: :jpeg, width: 1280, height: 720)
+
+      # Set JPEG quality for channel 2 (channel 2 is still selected after configure_channel above)
+      {:ok, :ok} = Camera.set_ctrl(cam, :quality, 75)
+  """
+  @spec configure_channel(t(), 0..2, keyword()) :: :ok | {:error, term()}
+  def configure_channel(%__MODULE__{} = cam, channel, opts \\ []) when channel in 0..2 do
+    with {:ok, :ok} <- set_ctrl(cam, :channel, channel),
+         :ok <- maybe_set_ctrl(cam, :format, opts[:format]),
+         :ok <- maybe_set_window(cam, opts[:width], opts[:height]),
+         :ok <- maybe_set_ctrl(cam, :fps, opts[:fps]) do
+      :ok
+    end
+  end
+
+  defp maybe_set_ctrl(_cam, _ctrl, nil), do: :ok
+
+  defp maybe_set_ctrl(cam, ctrl, value) do
+    case set_ctrl(cam, ctrl, value) do
+      {:ok, :ok} -> :ok
+      error -> error
+    end
+  end
+
+  defp maybe_set_window(_cam, nil, nil), do: :ok
+  defp maybe_set_window(_cam, nil, _), do: {:error, :missing_width}
+  defp maybe_set_window(_cam, _, nil), do: {:error, :missing_height}
+
+  defp maybe_set_window(cam, w, h) do
+    case set_ctrl(cam, :window, {w, h}) do
+      {:ok, :ok} -> :ok
+      error -> error
     end
   end
 

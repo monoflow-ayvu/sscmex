@@ -2,6 +2,16 @@
 
 static bool is_started = false;
 
+static PIXEL_FORMAT_E video_format_to_pixel_format(video_format_t fmt) {
+    switch (fmt) {
+        case VIDEO_FORMAT_NV21:      return PIXEL_FORMAT_NV21;
+        case VIDEO_FORMAT_GRAYSCALE: return PIXEL_FORMAT_YUV_400;
+        case VIDEO_FORMAT_NV12:      return PIXEL_FORMAT_NV12;
+        case VIDEO_FORMAT_YUV422:    return PIXEL_FORMAT_YUV_PLANAR_422;
+        default:                     return PIXEL_FORMAT_RGB_888;
+    }
+}
+
 static int setVbPool(video_ch_index_t ch, const video_ch_param_t* param) {
     APP_PARAM_SYS_CFG_S* sys = app_ipcam_Sys_Param_Get();
 
@@ -18,7 +28,7 @@ static int setVbPool(video_ch_index_t ch, const video_ch_param_t* param) {
     vb->bEnable            = 1;
     vb->width              = param->width;
     vb->height             = param->height;
-    vb->fmt                = (param->format == VIDEO_FORMAT_RGB888) ? PIXEL_FORMAT_RGB_888 : PIXEL_FORMAT_NV21;
+    vb->fmt                = video_format_to_pixel_format(param->format);
 
     return 0;
 }
@@ -45,7 +55,7 @@ static int setGrpChn(int grp, video_ch_index_t ch, const video_ch_param_t* param
     VPSS_CHN_ATTR_S* vpss_chn = &pgrp->astVpssChnAttr[ch];
     vpss_chn->u32Width        = param->width;
     vpss_chn->u32Height       = param->height;
-    vpss_chn->enPixelFormat   = (param->format == VIDEO_FORMAT_RGB888) ? PIXEL_FORMAT_RGB_888 : PIXEL_FORMAT_NV21;
+    vpss_chn->enPixelFormat   = video_format_to_pixel_format(param->format);
 
     return 0;
 }
@@ -76,7 +86,9 @@ static int setVencChn(video_ch_index_t ch, const video_ch_param_t* param) {
     pvchn->u32Height          = param->height;
     pvchn->u32DstFrameRate    = param->fps;
 
-    if ((VIDEO_FORMAT_RGB888 == param->format) || (VIDEO_FORMAT_NV21 == param->format)) {
+    if (param->format == VIDEO_FORMAT_RGB888  || param->format == VIDEO_FORMAT_NV21 ||
+        param->format == VIDEO_FORMAT_GRAYSCALE || param->format == VIDEO_FORMAT_NV12 ||
+        param->format == VIDEO_FORMAT_YUV422) {
         pvchn->no_need_venc = 1;
     }
 

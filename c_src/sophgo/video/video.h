@@ -8,11 +8,14 @@ extern "C" {
 #include "app_ipcam_paramparse.h"
 
 typedef enum {
-    VIDEO_FORMAT_RGB888 = 0, // no need venc
-    VIDEO_FORMAT_NV21, // no need venc
+    VIDEO_FORMAT_RGB888 = 0, // no need venc — PIXEL_FORMAT_RGB_888
+    VIDEO_FORMAT_NV21,       // no need venc — PIXEL_FORMAT_NV21
     VIDEO_FORMAT_JPEG,
     VIDEO_FORMAT_H264,
     VIDEO_FORMAT_H265,
+    VIDEO_FORMAT_GRAYSCALE,  // no need venc — PIXEL_FORMAT_YUV_400
+    VIDEO_FORMAT_NV12,       // no need venc — PIXEL_FORMAT_NV12
+    VIDEO_FORMAT_YUV422,     // no need venc — PIXEL_FORMAT_YUV_PLANAR_422
 
     VIDEO_FORMAT_COUNT
 } video_format_t;

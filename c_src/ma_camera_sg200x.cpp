@@ -285,7 +285,10 @@ ma_err_t CameraSG200X::startStream(StreamMode mode) noexcept {
                     param.format = VIDEO_FORMAT_RGB888;
                     break;
                 case MA_PIXEL_FORMAT_YUV422:
-                    param.format = VIDEO_FORMAT_NV21;
+                    param.format = VIDEO_FORMAT_YUV422;
+                    break;
+                case MA_PIXEL_FORMAT_GRAYSCALE:
+                    param.format = VIDEO_FORMAT_GRAYSCALE;
                     break;
                 default:
                     return MA_ENOTSUP;
@@ -359,6 +362,7 @@ ma_err_t CameraSG200X::commandCtrl(CtrlType ctrl, CtrlMode mode, CtrlValue& valu
             break;
         case kFormat:
             if (mode == kWrite) {
+                if (m_streaming) return MA_EPERM;
                 MA_LOGD(TAG, "%d kFormat: %d", chn, value.i32);
                 m_channels[chn].format = static_cast<ma_pixel_format_t>(value.i32);
             } else if (mode == kRead) {
@@ -380,29 +384,23 @@ ma_err_t CameraSG200X::commandCtrl(CtrlType ctrl, CtrlMode mode, CtrlValue& valu
     return MA_OK;
 }
 
-ma_err_t CameraSG200X::retrieveFrame(ma_img_t& frame, ma_pixel_format_t format) noexcept {
+ma_err_t CameraSG200X::retrieveFrame(ma_img_t& frame, ma_pixel_format_t) noexcept {
+    return MA_ENOTSUP;
+}
+
+ma_err_t CameraSG200X::retrieveChannel(ma_img_t& frame, int channel_idx) noexcept {
     if (!m_streaming) [[unlikely]] {
         return MA_EPERM;
     }
-    int chn = 0;
-    switch (format) {
-        case MA_PIXEL_FORMAT_JPEG:
-            chn = 1;
-            break;
-        case MA_PIXEL_FORMAT_H264:
-        case MA_PIXEL_FORMAT_H265:
-            chn = 2;
-            break;
-        default:
-            break;
+    if (channel_idx < 0 || channel_idx >= CHN_MAX) {
+        return MA_EINVAL;
     }
-
-    if (!m_channels[chn].enabled) [[unlikely]] {
+    if (!m_channels[channel_idx].enabled) [[unlikely]] {
         return MA_EPERM;
     }
 
     ma_img_t* img = nullptr;
-    if (!m_channels[chn].queue->fetch(reinterpret_cast<void**>(&img), Tick::fromMilliseconds(1000 / m_channels[chn].fps))) {
+    if (!m_channels[channel_idx].queue->fetch(reinterpret_cast<void**>(&img), Tick::fromMilliseconds(1000 / m_channels[channel_idx].fps))) {
         return MA_AGAIN;
     }
 
