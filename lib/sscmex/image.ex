@@ -112,7 +112,8 @@ defmodule SSCMEx.Image do
   """
   @spec convert(t(), convert_format(), keyword()) :: {:ok, t()} | {:error, atom()}
   def convert(%__MODULE__{} = image, format, opts \\ []) do
-    SSCMEx.Nif.image_convert(image, format, opts)
+    quality = Keyword.get(opts, :quality, 85)
+    SSCMEx.Nif.image_convert(image, format, quality)
   end
 
   @doc """
@@ -131,7 +132,8 @@ defmodule SSCMEx.Image do
           {:ok, t()} | {:error, atom()}
   def resize(%__MODULE__{} = image, {w, h}, opts \\ [])
       when is_integer(w) and is_integer(h) and w > 0 and h > 0 do
-    SSCMEx.Nif.image_resize(image, {w, h}, opts)
+    interp = opts |> Keyword.get(:interpolation, :linear) |> map_interpolation()
+    SSCMEx.Nif.image_resize(image, {w, h}, interp)
   end
 
   @doc """
@@ -168,6 +170,11 @@ defmodule SSCMEx.Image do
       :unsupported -> false
     end
   end
+
+  # Maps Elixir interpolation atoms to the atoms the C NIF recognises.
+  defp map_interpolation(:bilinear), do: :linear
+  defp map_interpolation(:bicubic), do: :cubic
+  defp map_interpolation(other), do: other
 
   # Returns bytes per pixel for raw formats, :encoded for compressed formats.
   @spec bytes_per_pixel(format()) :: {:ok, non_neg_integer()} | :encoded | :unsupported
