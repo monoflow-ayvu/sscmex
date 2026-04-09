@@ -54,23 +54,34 @@ int CameraSG200X::vencCallback(void* pData, void* pArgs) {
     }
 
     VENC_STREAM_S* pstStream = (VENC_STREAM_S*)pData;
-    VENC_PACK_S* ppack;
 
+    CVI_U32 total_size = 0;
     for (CVI_U32 i = 0; i < pstStream->u32PackCount; i++) {
-        ppack           = &pstStream->pstPack[i];
-        ma_img_t* frame = new ma_img_t;
-        frame->data     = new uint8_t[ppack->u32Len - ppack->u32Offset];
-        memcpy(frame->data, ppack->pu8Addr + ppack->u32Offset, ppack->u32Len - ppack->u32Offset);
-        frame->size      = ppack->u32Len - ppack->u32Offset;
-        frame->width     = m_channels[VencChn].width;
-        frame->height    = m_channels[VencChn].height;
-        frame->format    = m_channels[VencChn].format;
-        frame->timestamp = Tick::current();
-        frame->count     = pstStream->u32PackCount;
-        frame->index     = i;
-        frame->physical  = false;
+        VENC_PACK_S* p = &pstStream->pstPack[i];
+        total_size += p->u32Len - p->u32Offset;
+    }
+
+    ma_img_t* frame  = new ma_img_t;
+    frame->data      = new uint8_t[total_size];
+    frame->size      = total_size;
+    frame->width     = m_channels[VencChn].width;
+    frame->height    = m_channels[VencChn].height;
+    frame->format    = m_channels[VencChn].format;
+    frame->timestamp = Tick::current();
+    frame->count     = 1;
+    frame->index     = 0;
+    frame->physical  = false;
+    frame->key       = false;
+
+    CVI_U32 offset = 0;
+    for (CVI_U32 i = 0; i < pstStream->u32PackCount; i++) {
+        VENC_PACK_S* p  = &pstStream->pstPack[i];
+        CVI_U32 len     = p->u32Len - p->u32Offset;
+        memcpy(frame->data + offset, p->pu8Addr + p->u32Offset, len);
+        offset += len;
+
         if (m_channels[VencChn].format == MA_PIXEL_FORMAT_H264) {
-            switch (ppack->DataType.enH264EType) {
+            switch (p->DataType.enH264EType) {
                 case H264E_NALU_ISLICE:
                 case H264E_NALU_SPS:
                 case H264E_NALU_IDRSLICE:
@@ -79,15 +90,16 @@ int CameraSG200X::vencCallback(void* pData, void* pArgs) {
                     frame->key = true;
                     break;
                 default:
-                    frame->key = false;
                     break;
             }
         }
-        if (!m_channels[VencChn].queue->post(frame, Tick::fromMilliseconds(1000 / m_channels[VencChn].fps))) {
-            delete[] frame->data;
-            delete frame;
-        }
     }
+
+    if (!m_channels[VencChn].queue->post(frame, Tick::fromMilliseconds(1000 / m_channels[VencChn].fps))) {
+        delete[] frame->data;
+        delete frame;
+    }
+
     return CVI_SUCCESS;
 }
 
