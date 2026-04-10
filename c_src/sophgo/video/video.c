@@ -8,7 +8,11 @@ static PIXEL_FORMAT_E video_format_to_pixel_format(video_format_t fmt) {
         case VIDEO_FORMAT_GRAYSCALE: return PIXEL_FORMAT_YUV_400;
         case VIDEO_FORMAT_NV12:      return PIXEL_FORMAT_NV12;
         case VIDEO_FORMAT_YUV422:    return PIXEL_FORMAT_YUV_PLANAR_422;
-        default:                     return PIXEL_FORMAT_RGB_888;
+        case VIDEO_FORMAT_H264:      return PIXEL_FORMAT_NV21;
+        case VIDEO_FORMAT_H265:      return PIXEL_FORMAT_NV21;
+        default:
+            APP_PROF_LOG_PRINT(LEVEL_WARN, "unknown video_format_t %d, defaulting to RGB_888\n", fmt);
+            return PIXEL_FORMAT_RGB_888;
     }
 }
 
