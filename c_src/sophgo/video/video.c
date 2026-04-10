@@ -82,6 +82,10 @@ static int setVencChn(video_ch_index_t ch, const video_ch_param_t* param) {
         enType = PT_H264;
     } else if (VIDEO_FORMAT_H265 == param->format) {
         enType = PT_H265;
+    } else if (param->format != VIDEO_FORMAT_RGB888 && param->format != VIDEO_FORMAT_NV21 &&
+               param->format != VIDEO_FORMAT_GRAYSCALE && param->format != VIDEO_FORMAT_NV12 &&
+               param->format != VIDEO_FORMAT_YUV422) {
+        APP_PROF_LOG_PRINT(LEVEL_WARN, "unknown video_format_t %d for venc ch(%d), defaulting to PT_JPEG\n", param->format, ch);
     }
     app_ipcam_Param_setVencChnType(ch, enType);
     APP_VENC_CHN_CFG_S* pvchn = &venc->astVencChnCfg[ch];
