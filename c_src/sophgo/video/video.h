@@ -5,6 +5,7 @@
 extern "C" {
 #endif
 
+#include <stdbool.h>
 #include "app_ipcam_paramparse.h"
 
 typedef enum {
@@ -28,11 +29,32 @@ typedef enum {
     VIDEO_CH_MAX
 } video_ch_index_t;
 
+typedef enum {
+    VIDEO_RC_MODE_CBR = 0,
+    VIDEO_RC_MODE_VBR,
+    VIDEO_RC_MODE_AVBR,
+    VIDEO_RC_MODE_FIXQP,
+} video_rc_mode_t;
+
+typedef struct {
+    bool has_venc_params;
+    uint32_t bitrate;
+    uint32_t max_bitrate;
+    uint32_t gop;
+    video_rc_mode_t rc_mode;
+    uint32_t min_qp;
+    uint32_t max_qp;
+    uint32_t min_iqp;
+    uint32_t max_iqp;
+    uint32_t profile;
+} video_venc_params_t;
+
 typedef struct {
     video_format_t format;
     uint32_t width;
     uint32_t height;
     uint8_t fps;
+    video_venc_params_t venc_params;
 } video_ch_param_t;
 
 // typedef struct {
@@ -49,6 +71,7 @@ int deinitVideo(void);
 int startVideo(void);
 int setupVideo(video_ch_index_t ch, const video_ch_param_t* param);
 int registerVideoFrameHandler(video_ch_index_t ch, int index, pfpDataConsumes handler, void* pUserData);
+int requestKeyframe(video_ch_index_t ch);
 
 #ifdef __cplusplus
 }

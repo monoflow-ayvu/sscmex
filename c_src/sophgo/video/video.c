@@ -94,12 +94,54 @@ static int setVencChn(video_ch_index_t ch, const video_ch_param_t* param) {
     pvchn->u32Height          = param->height;
     pvchn->u32DstFrameRate    = param->fps;
 
+    if (param->venc_params.has_venc_params && (enType == PT_H264 || enType == PT_H265)) {
+        const video_venc_params_t* vp = &param->venc_params;
+        pvchn->u32BitRate          = vp->bitrate;
+        pvchn->u32MaxBitRate       = vp->max_bitrate;
+        pvchn->u32Gop              = vp->gop;
+        pvchn->u32Profile          = vp->profile;
+        pvchn->stRcParam.u32MaxQp  = vp->max_qp;
+        pvchn->stRcParam.u32MinQp  = vp->min_qp;
+        pvchn->stRcParam.u32MaxIQp = vp->max_iqp;
+        pvchn->stRcParam.u32MinIQp = vp->min_iqp;
+
+        if (enType == PT_H264) {
+            switch (vp->rc_mode) {
+                case VIDEO_RC_MODE_VBR:   pvchn->enRcMode = VENC_RC_MODE_H264VBR;   break;
+                case VIDEO_RC_MODE_AVBR:  pvchn->enRcMode = VENC_RC_MODE_H264AVBR;  break;
+                case VIDEO_RC_MODE_FIXQP: pvchn->enRcMode = VENC_RC_MODE_H264FIXQP; break;
+                default:                  pvchn->enRcMode = VENC_RC_MODE_H264CBR;    break;
+            }
+        } else {
+            switch (vp->rc_mode) {
+                case VIDEO_RC_MODE_VBR:   pvchn->enRcMode = VENC_RC_MODE_H265VBR;   break;
+                case VIDEO_RC_MODE_AVBR:  pvchn->enRcMode = VENC_RC_MODE_H265AVBR;  break;
+                case VIDEO_RC_MODE_FIXQP: pvchn->enRcMode = VENC_RC_MODE_H265FIXQP; break;
+                default:                  pvchn->enRcMode = VENC_RC_MODE_H265CBR;    break;
+            }
+        }
+        APP_PROF_LOG_PRINT(LEVEL_INFO,
+            "ch(%d) venc_params applied: bitrate=%u max_bitrate=%u gop=%u rc_mode=%d "
+            "qp=[%u,%u] iqp=[%u,%u] profile=%u\n",
+            ch, vp->bitrate, vp->max_bitrate, vp->gop, (int)vp->rc_mode,
+            vp->min_qp, vp->max_qp, vp->min_iqp, vp->max_iqp, vp->profile);
+    }
+
     if (param->format == VIDEO_FORMAT_RGB888  || param->format == VIDEO_FORMAT_NV21 ||
         param->format == VIDEO_FORMAT_GRAYSCALE || param->format == VIDEO_FORMAT_NV12 ||
         param->format == VIDEO_FORMAT_YUV422) {
         pvchn->no_need_venc = 1;
     }
 
+    return 0;
+}
+
+int requestKeyframe(video_ch_index_t ch) {
+    CVI_S32 ret = CVI_VENC_RequestIDR(ch, CVI_TRUE);
+    if (ret != CVI_SUCCESS) {
+        APP_PROF_LOG_PRINT(LEVEL_ERROR, "CVI_VENC_RequestIDR ch(%d) failed: %d\n", ch, ret);
+        return -1;
+    }
     return 0;
 }
 

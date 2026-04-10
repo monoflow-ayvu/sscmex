@@ -24,6 +24,7 @@ class CameraSG200X final : public Camera {
         bool configured;
         bool enabled;
         MessageBox* queue;
+        video_venc_params_t venc_params = {};
     } channel;
 
 public:
@@ -41,6 +42,7 @@ public:
     ma_err_t retrieveFrame(ma_img_t& frame, ma_pixel_format_t format) noexcept override;
     ma_err_t retrieveChannel(ma_img_t& frame, int channel_idx) noexcept;
     void returnFrame(ma_img_t& frame) noexcept override;
+    void setChannelVencParams(int ch, const video_venc_params_t& params) noexcept;
 
 private:
     channel m_channels[CHN_MAX];

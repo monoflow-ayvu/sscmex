@@ -2021,6 +2021,53 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         return CVI_ISP_SetCNRAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_cnr_strength_failed");
     }
 
+    // --- VENC encoder parameters (H.264 / H.265 only, applied at startStream time) ---
+    if (strcmp(ctrl_atom, "venc_params") == 0) {
+        if (!enif_is_map(env, argv[2])) return make_error(env, "invalid_venc_params");
+
+        Camera::CtrlValue chn_val{};
+        if (res->val->camera->commandCtrl(Camera::kChannel, Camera::kRead, chn_val) != MA_OK)
+            return make_error(env, "failed_to_read_channel");
+        int ch = chn_val.i32;
+
+        video_venc_params_t vp{};
+        vp.has_venc_params = true;
+
+        ERL_NIF_TERM mval;
+        int iv;
+
+        if (enif_get_map_value(env, argv[2], make_atom(env, "bitrate"), &mval) && enif_get_int(env, mval, &iv))
+            vp.bitrate = (uint32_t)iv;
+        if (enif_get_map_value(env, argv[2], make_atom(env, "max_bitrate"), &mval) && enif_get_int(env, mval, &iv))
+            vp.max_bitrate = (uint32_t)iv;
+        if (enif_get_map_value(env, argv[2], make_atom(env, "gop"), &mval) && enif_get_int(env, mval, &iv))
+            vp.gop = (uint32_t)iv;
+        if (enif_get_map_value(env, argv[2], make_atom(env, "min_qp"), &mval) && enif_get_int(env, mval, &iv))
+            vp.min_qp = (uint32_t)iv;
+        if (enif_get_map_value(env, argv[2], make_atom(env, "max_qp"), &mval) && enif_get_int(env, mval, &iv))
+            vp.max_qp = (uint32_t)iv;
+        if (enif_get_map_value(env, argv[2], make_atom(env, "min_iqp"), &mval) && enif_get_int(env, mval, &iv))
+            vp.min_iqp = (uint32_t)iv;
+        if (enif_get_map_value(env, argv[2], make_atom(env, "max_iqp"), &mval) && enif_get_int(env, mval, &iv))
+            vp.max_iqp = (uint32_t)iv;
+        if (enif_get_map_value(env, argv[2], make_atom(env, "profile"), &mval) && enif_get_int(env, mval, &iv))
+            vp.profile = (uint32_t)iv;
+
+        if (enif_get_map_value(env, argv[2], make_atom(env, "rc_mode"), &mval)) {
+            char rc_atom[16];
+            if (enif_get_atom(env, mval, rc_atom, sizeof(rc_atom), ERL_NIF_LATIN1)) {
+                if (strcmp(rc_atom, "vbr") == 0)        vp.rc_mode = VIDEO_RC_MODE_VBR;
+                else if (strcmp(rc_atom, "avbr") == 0)  vp.rc_mode = VIDEO_RC_MODE_AVBR;
+                else if (strcmp(rc_atom, "fixqp") == 0) vp.rc_mode = VIDEO_RC_MODE_FIXQP;
+                else                                    vp.rc_mode = VIDEO_RC_MODE_CBR;
+            }
+        }
+
+        auto* sg200x = static_cast<ma::CameraSG200X*>(res->val->camera);
+        sg200x->setChannelVencParams(ch, vp);
+        return make_ok(env, make_atom(env, "ok"));
+    }
+
     Camera::CtrlType ctrl;
     if (!parse_camera_ctrl_type(env, argv[1], &ctrl)) {
         return make_error(env, "unsupported_ctrl");
@@ -2064,6 +2111,19 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
     ma_err_t err = res->val->camera->commandCtrl(ctrl, Camera::CtrlMode::kWrite, value);
     return err == MA_OK ? make_ok(env, make_atom(env, "ok"))
                         : make_error(env, "set_ctrl_failed");
+}
+
+// NIF: Request IDR keyframe on a running H.264/H.265 channel
+static ERL_NIF_TERM camera_request_keyframe(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    auto* res = NifRes<CameraRes>::get(env, argv[0]);
+    if (!res || !res->val || !res->val->camera) return make_error(env, "invalid_resource");
+
+    int ch;
+    if (!enif_get_int(env, argv[1], &ch)) return make_error(env, "invalid_channel");
+    if (ch < 0 || ch > 2) return make_error(env, "channel_out_of_range");
+
+    int ret = requestKeyframe(static_cast<video_ch_index_t>(ch));
+    return ret == 0 ? make_ok(env, make_atom(env, "ok")) : make_error(env, "request_keyframe_failed");
 }
 
 // NIF: Get camera control
@@ -2283,6 +2343,7 @@ static ErlNifFunc nif_functions[] = {
     {"camera_set_ctrl", 3, camera_set_ctrl, 0},
     {"camera_get_ctrl", 2, camera_get_ctrl, 0},
     {"camera_get_id", 1, camera_get_id, 0},
+    {"camera_request_keyframe", 2, camera_request_keyframe, 0},
 
     // Image processing functions
     {"image_convert", 3, image_convert, ERL_NIF_DIRTY_JOB_CPU_BOUND},

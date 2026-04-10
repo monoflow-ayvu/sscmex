@@ -306,6 +306,7 @@ ma_err_t CameraSG200X::startStream(StreamMode mode) noexcept {
                     return MA_ENOTSUP;
                     break;
             }
+            param.venc_params = m_channels[i].venc_params;
             MA_LOGI(TAG, "width: %d, height: %d, fps: %d format: %d", param.width, param.height, param.fps, param.format);
             setupVideo(static_cast<video_ch_index_t>(i), &param);
 
@@ -394,6 +395,14 @@ ma_err_t CameraSG200X::commandCtrl(CtrlType ctrl, CtrlMode mode, CtrlValue& valu
             break;
     }
     return MA_OK;
+}
+
+void CameraSG200X::setChannelVencParams(int ch, const video_venc_params_t& params) noexcept {
+    if (ch < 0 || ch >= CHN_MAX) {
+        MA_LOGW(TAG, "setChannelVencParams: invalid channel %d (max %d)", ch, CHN_MAX - 1);
+        return;
+    }
+    m_channels[ch].venc_params = params;
 }
 
 ma_err_t CameraSG200X::retrieveFrame(ma_img_t& frame, ma_pixel_format_t) noexcept {

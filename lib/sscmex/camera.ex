@@ -293,6 +293,23 @@ defmodule SSCMEx.Camera do
   - `:width` and `:height` - frame dimensions (must both be provided together).
   - `:fps` - target frame rate.
 
+  ## H.264 / H.265 encoder options
+
+  The following options are only applied when `format:` is `:h264` or `:h265`.
+  If none are provided the encoder template defaults are used.
+
+  - `:bitrate` - target bitrate in kbps (default: 1000 for H264, 3000 for H265)
+  - `:max_bitrate` - peak bitrate in kbps; set equal to `:bitrate` for pure CBR
+    (defaults to the value of `:bitrate`)
+  - `:gop` - keyframe interval in frames (default: 50)
+  - `:rc_mode` - rate control mode: `:cbr` | `:vbr` | `:avbr` | `:fixqp` (default: `:cbr`)
+  - `:min_qp` - P-frame QP floor (default: 20)
+  - `:max_qp` - P-frame QP ceiling; too low causes malformed P-frames on
+    high-motion scenes in CBR mode (default: 35)
+  - `:min_iqp` - I-frame QP floor (default: 20)
+  - `:max_iqp` - I-frame QP ceiling (default: 35)
+  - `:profile` - codec profile: `:baseline` | `:main` | `:high` (default: `:baseline`)
+
   ## JPEG quality
 
   Quality control (`set_ctrl(cam, :quality, value)`) applies to the channel that
@@ -310,16 +327,54 @@ defmodule SSCMEx.Camera do
 
       # Set JPEG quality for channel 2 (channel 2 is still selected after configure_channel above)
       {:ok, :ok} = Camera.set_ctrl(cam, :quality, 75)
+
+      # H.264 with tuned encoder params
+      :ok = Camera.configure_channel(cam, 2,
+        format: :h264, width: 640, height: 360, fps: 15,
+        bitrate: 3000, gop: 15, max_qp: 45
+      )
   """
   @spec configure_channel(t(), 0..2, keyword()) :: :ok | {:error, term()}
   def configure_channel(%__MODULE__{} = cam, channel, opts \\ []) when channel in 0..2 do
     with {:ok, :ok} <- set_ctrl(cam, :channel, channel),
          :ok <- maybe_set_ctrl(cam, :format, opts[:format]),
          :ok <- maybe_set_window(cam, opts[:width], opts[:height]),
-         :ok <- maybe_set_ctrl(cam, :fps, opts[:fps]) do
+         :ok <- maybe_set_ctrl(cam, :fps, opts[:fps]),
+         :ok <- maybe_set_venc_params(cam, opts) do
       :ok
     end
   end
+
+  @venc_param_keys [:bitrate, :max_bitrate, :gop, :rc_mode, :min_qp, :max_qp, :min_iqp, :max_iqp, :profile]
+
+  defp maybe_set_venc_params(cam, opts) do
+    if Enum.any?(@venc_param_keys, &Keyword.has_key?(opts, &1)) do
+      format = opts[:format]
+      default_bitrate = if format == :h265, do: 3000, else: 1000
+
+      params = %{
+        bitrate: Keyword.get(opts, :bitrate, default_bitrate),
+        max_bitrate: Keyword.get(opts, :max_bitrate, Keyword.get(opts, :bitrate, default_bitrate)),
+        gop: Keyword.get(opts, :gop, 50),
+        rc_mode: Keyword.get(opts, :rc_mode, :cbr),
+        min_qp: Keyword.get(opts, :min_qp, 20),
+        max_qp: Keyword.get(opts, :max_qp, 35),
+        min_iqp: Keyword.get(opts, :min_iqp, 20),
+        max_iqp: Keyword.get(opts, :max_iqp, 35),
+        profile: profile_to_int(Keyword.get(opts, :profile, :baseline))
+      }
+
+      maybe_set_ctrl(cam, :venc_params, params)
+    else
+      :ok
+    end
+  end
+
+  defp profile_to_int(:baseline), do: 0
+  defp profile_to_int(:main), do: 1
+  defp profile_to_int(:high), do: 2
+  defp profile_to_int(n) when is_integer(n), do: n
+  defp profile_to_int(_), do: 0
 
   defp maybe_set_ctrl(_cam, _ctrl, nil), do: :ok
 
@@ -455,6 +510,29 @@ defmodule SSCMEx.Camera do
   @spec get_id(t()) :: {:ok, non_neg_integer()} | {:error, term()}
   def get_id(%__MODULE__{resource: resource}) do
     SSCMEx.Nif.camera_get_id(resource)
+  end
+
+  @doc """
+  Request an immediate IDR keyframe on a running H.264/H.265 channel.
+
+  When a new viewer connects to a live stream mid-GOP it must wait up to
+  `gop / fps` seconds for the next natural IDR before it can decode anything.
+  Calling this injects an IDR immediately, giving sub-100ms first-frame time
+  regardless of GOP size.
+
+  The stream must be running. Returns `{:error, :request_keyframe_failed}` if
+  the VENC channel is not active or the codec is not H.264/H.265.
+
+  ## Examples
+
+      :ok = SSCMEx.Camera.request_keyframe(camera, 2)
+  """
+  @spec request_keyframe(t(), 0..2) :: :ok | {:error, term()}
+  def request_keyframe(%__MODULE__{resource: resource}, channel) when channel in 0..2 do
+    case SSCMEx.Nif.camera_request_keyframe(resource, channel) do
+      {:ok, :ok} -> :ok
+      error -> error
+    end
   end
 
   @doc """
