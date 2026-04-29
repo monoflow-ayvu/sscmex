@@ -4,10 +4,14 @@ static bool is_started = false;
 
 static PIXEL_FORMAT_E video_format_to_pixel_format(video_format_t fmt) {
     switch (fmt) {
+        case VIDEO_FORMAT_RGB888:    return PIXEL_FORMAT_RGB_888;
         case VIDEO_FORMAT_NV21:      return PIXEL_FORMAT_NV21;
         case VIDEO_FORMAT_GRAYSCALE: return PIXEL_FORMAT_YUV_400;
         case VIDEO_FORMAT_NV12:      return PIXEL_FORMAT_NV12;
         case VIDEO_FORMAT_YUV422:    return PIXEL_FORMAT_YUV_PLANAR_422;
+        // JPEG / H.264 / H.265 all encode from NV21 input; the VENC channel
+        // expects YUV planar input regardless of the output codec.
+        case VIDEO_FORMAT_JPEG:      return PIXEL_FORMAT_NV21;
         case VIDEO_FORMAT_H264:      return PIXEL_FORMAT_NV21;
         case VIDEO_FORMAT_H265:      return PIXEL_FORMAT_NV21;
         default:
