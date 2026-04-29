@@ -313,8 +313,9 @@ ma_err_t CameraSG200X::startStream(StreamMode mode) noexcept {
             if (m_channels[i].queue != nullptr) {
                 clearChannelQueue(m_channels[i]);
             }
-            // m_channels[i].queue = new MessageBox(param.fps);
-            m_channels[i].queue = new MessageBox(1);
+            // Queue depth = fps so up to one second of jitter on the consumer
+            // side is tolerated before a frame is dropped.
+            m_channels[i].queue = new MessageBox(param.fps);
 
             if (param.format == VIDEO_FORMAT_RGB888 || param.format == VIDEO_FORMAT_NV21) {
                 registerVideoFrameHandler(static_cast<video_ch_index_t>(i), 0, vpssCallbackStub, this);

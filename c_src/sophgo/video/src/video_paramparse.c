@@ -1,7 +1,6 @@
 #include "app_ipcam_paramparse.h"
 
 // SYS - vb_pool
-// Match sscma-elixir (same hardware): vb_blk_num = 2 for two channels (RAW + JPEG).
 static const APP_PARAM_VB_CFG_S vbpool = {
     .bEnable = 0,
     .width = 1,//1920,
@@ -9,7 +8,7 @@ static const APP_PARAM_VB_CFG_S vbpool = {
     .fmt = PIXEL_FORMAT_NV21,
     .enBitWidth = DATA_BITWIDTH_8,
     .enCmpMode = COMPRESS_MODE_NONE,
-    .vb_blk_num = 2,
+    .vb_blk_num = 4, // CH0+CH1+CH2 plus headroom for VENC reference frames
 };
 
 // VI
@@ -66,7 +65,6 @@ static const APP_PARAM_CHN_CFG_T chn_cfg = {
     .enCompressMode = COMPRESS_MODE_TILE,
 };
 
-// VPSS
 static const VPSS_CHN_ATTR_S chn_attr = {
     .u32Width = 1920,
     .u32Height = 1080,
@@ -78,7 +76,8 @@ static const VPSS_CHN_ATTR_S chn_attr = {
     },
     .bMirror = 0,
     .bFlip = 0,
-    .u32Depth = 0,
+    // 3 is required so VPSS can hold reference frames for a bound VENC encoder
+    .u32Depth = 3,
     .stAspectRatio = {
         .enMode = ASPECT_RATIO_AUTO,
         .bEnableBgColor = 1,
@@ -120,7 +119,7 @@ static const APP_RC_PARAM_S h264_stRcParam = {
     .u32MaxIprop = 10,
     .s32MaxReEncodeTimes = 0,
     .s32MinStillPercent = 10,
-    .u32MaxStillQP = 38,
+    .u32MaxStillQP = 35,
     .u32MinStillPSNR = 0,
     .u32MaxQp = 35,
     .u32MinQp = 20,
