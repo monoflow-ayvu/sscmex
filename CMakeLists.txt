@@ -89,6 +89,13 @@ file(GLOB_RECURSE SOPHGO_VIDEO_SOURCES
 # Build NIF shared library
 add_library(sscmex_nif SHARED ${SOURCE_FILES} ${SOPHGO_VIDEO_SOURCES})
 
+# Promote `venc` threads from `SCHED_OTHER` to `SCHED_RR` priority 80 to
+# prevent starving when other functions (ex: WiFi chip) consume several ms
+# to run, making the CSI line overflow.
+# Nerves is ran as `root`, but if otherwise you'd need to run this then
+# grant `CAP_SYS_NICE` and also enable `CONFIG_RT` in your kernel.
+target_compile_definitions(sscmex_nif PRIVATE APP_IPCAM_RT_SCHED_ENABLE=1)
+
 # Link TPU runtime library if SDK is available
 if(DEFINED SG200X_SDK_PATH AND NOT "${SG200X_SDK_PATH}" STREQUAL "")
     # TPU SDK library path
