@@ -309,6 +309,12 @@ defmodule SSCMEx.Camera do
   - `:min_iqp` - I-frame QP floor (default: 20)
   - `:max_iqp` - I-frame QP ceiling (default: 35)
   - `:profile` - codec profile: `:baseline` | `:main` | `:high` (default: `:baseline`)
+  - `:initial_delay` - CPB / hypothetical-decoder buffer fullness in milliseconds
+    before the encoder allows the first frame out. SDK default is 1000 (1 s);
+    drop to ~100 for low-latency live streaming. Omit to keep the SDK default.
+  - `:stat_time` - rate-control analysis window in seconds. SDK default is 2;
+    AVBR uses this as a lookahead, so dropping to 1 cuts AVBR-induced encode
+    lag. Omit to keep the SDK default.
 
   ## JPEG quality
 
@@ -345,7 +351,19 @@ defmodule SSCMEx.Camera do
     end
   end
 
-  @venc_param_keys [:bitrate, :max_bitrate, :gop, :rc_mode, :min_qp, :max_qp, :min_iqp, :max_iqp, :profile]
+  @venc_param_keys [
+    :bitrate,
+    :max_bitrate,
+    :gop,
+    :rc_mode,
+    :min_qp,
+    :max_qp,
+    :min_iqp,
+    :max_iqp,
+    :profile,
+    :initial_delay,
+    :stat_time
+  ]
 
   defp maybe_set_venc_params(cam, opts) do
     if Enum.any?(@venc_param_keys, &Keyword.has_key?(opts, &1)) do
@@ -354,7 +372,8 @@ defmodule SSCMEx.Camera do
 
       params = %{
         bitrate: Keyword.get(opts, :bitrate, default_bitrate),
-        max_bitrate: Keyword.get(opts, :max_bitrate, Keyword.get(opts, :bitrate, default_bitrate)),
+        max_bitrate:
+          Keyword.get(opts, :max_bitrate, Keyword.get(opts, :bitrate, default_bitrate)),
         gop: Keyword.get(opts, :gop, 50),
         rc_mode: Keyword.get(opts, :rc_mode, :cbr),
         min_qp: Keyword.get(opts, :min_qp, 20),
@@ -364,9 +383,21 @@ defmodule SSCMEx.Camera do
         profile: profile_to_int(Keyword.get(opts, :profile, :baseline))
       }
 
+      params =
+        params
+        |> put_if_present(opts, :initial_delay)
+        |> put_if_present(opts, :stat_time)
+
       maybe_set_ctrl(cam, :venc_params, params)
     else
       :ok
+    end
+  end
+
+  defp put_if_present(map, opts, key) do
+    case Keyword.fetch(opts, key) do
+      {:ok, v} -> Map.put(map, key, v)
+      :error -> map
     end
   end
 

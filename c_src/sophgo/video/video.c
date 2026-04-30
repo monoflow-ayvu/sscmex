@@ -109,6 +109,13 @@ static int setVencChn(video_ch_index_t ch, const video_ch_param_t* param) {
         pvchn->stRcParam.u32MaxIQp = vp->max_iqp;
         pvchn->stRcParam.u32MinIQp = vp->min_iqp;
 
+        if (vp->initial_delay > 0) {
+            pvchn->stRcParam.s32InitialDelay = vp->initial_delay;
+        }
+        if (vp->stat_time > 0) {
+            pvchn->statTime = vp->stat_time;
+        }
+
         if (enType == PT_H264) {
             switch (vp->rc_mode) {
                 case VIDEO_RC_MODE_VBR:   pvchn->enRcMode = VENC_RC_MODE_H264VBR;   break;
@@ -126,9 +133,10 @@ static int setVencChn(video_ch_index_t ch, const video_ch_param_t* param) {
         }
         APP_PROF_LOG_PRINT(LEVEL_INFO,
             "ch(%d) venc_params applied: bitrate=%u max_bitrate=%u gop=%u rc_mode=%d "
-            "qp=[%u,%u] iqp=[%u,%u] profile=%u\n",
+            "qp=[%u,%u] iqp=[%u,%u] profile=%u initial_delay=%d stat_time=%u\n",
             ch, vp->bitrate, vp->max_bitrate, vp->gop, (int)vp->rc_mode,
-            vp->min_qp, vp->max_qp, vp->min_iqp, vp->max_iqp, vp->profile);
+            vp->min_qp, vp->max_qp, vp->min_iqp, vp->max_iqp, vp->profile,
+            vp->initial_delay, vp->stat_time);
     }
 
     if (param->format == VIDEO_FORMAT_RGB888  || param->format == VIDEO_FORMAT_NV21 ||

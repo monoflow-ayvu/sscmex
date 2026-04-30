@@ -47,6 +47,14 @@ typedef struct {
     uint32_t min_iqp;
     uint32_t max_iqp;
     uint32_t profile;
+    // Low-latency knobs. Sentinel 0 means "leave the SDK default in place".
+    // initial_delay (ms): CPB / hypothetical decoder buffer fullness before
+    //   the encoder allows playback. SDK default is 1000ms; values like 100
+    //   trade burst-tolerance for shipping the first frame sooner.
+    // stat_time (s): rate-control analysis window. SDK default is 2s; AVBR
+    //   uses this as a lookahead, so dropping to 1 cuts AVBR's encode lag.
+    int32_t  initial_delay;
+    uint32_t stat_time;
 } video_venc_params_t;
 
 typedef struct {

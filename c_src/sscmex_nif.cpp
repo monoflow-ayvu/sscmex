@@ -2052,6 +2052,10 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
             vp.max_iqp = (uint32_t)iv;
         if (enif_get_map_value(env, argv[2], make_atom(env, "profile"), &mval) && enif_get_int(env, mval, &iv))
             vp.profile = (uint32_t)iv;
+        if (enif_get_map_value(env, argv[2], make_atom(env, "initial_delay"), &mval) && enif_get_int(env, mval, &iv))
+            vp.initial_delay = (int32_t)iv;
+        if (enif_get_map_value(env, argv[2], make_atom(env, "stat_time"), &mval) && enif_get_int(env, mval, &iv))
+            vp.stat_time = (uint32_t)iv;
 
         if (enif_get_map_value(env, argv[2], make_atom(env, "rc_mode"), &mval)) {
             char rc_atom[16];
