@@ -4,6 +4,7 @@
 #include <forward_list>
 #include <limits>
 #include <vector>
+#include <time.h>
 
 #include "nif_utils.hpp"
 #include "sscma/core/engine/ma_engine_cvi.h"
@@ -2296,6 +2297,21 @@ static ERL_NIF_TERM isp_available(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
                               : make_ok(env, make_atom(env, "false"));
 }
 
+// Returns CLOCK_MONOTONIC time in nanoseconds — the same clock and unit
+// that `Tick::current()` uses to stamp `Image.timestamp`. Erlang's
+// `System.monotonic_time/1` is also CLOCK_MONOTONIC-based but with a
+// different epoch (VM start vs boot), so subtracting `image.timestamp`
+// from `System.monotonic_time/1` produces nonsense. Use this NIF
+// instead so dwell math is a single-clock subtraction.
+static ERL_NIF_TERM tick_now(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+        return make_error(env, "clock_gettime_failed");
+    }
+    int64_t ns = static_cast<int64_t>(ts.tv_sec) * 1000000000LL + ts.tv_nsec;
+    return enif_make_int64(env, ns);
+}
+
 static ErlNifFunc nif_functions[] = {
     // Engine functions
     {"engine_cvi_new", 0, engine_cvi_new, 0},
@@ -2355,6 +2371,9 @@ static ErlNifFunc nif_functions[] = {
 
     // ISP functions
     {"isp_available", 0, isp_available, 0},
+
+    // Tick — same clock that stamps Image.timestamp (CLOCK_MONOTONIC ns)
+    {"tick_now", 0, tick_now, 0},
 };
 
 // NIF initialization - register resource type

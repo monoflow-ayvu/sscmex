@@ -97,4 +97,7 @@ defmodule SSCMEx.Nif do
 
   # ISP functions
   def isp_available, do: :erlang.nif_error(:nif_not_loaded)
+
+  # Tick — same clock that stamps Image.timestamp (CLOCK_MONOTONIC ns).
+  def tick_now, do: :erlang.nif_error(:nif_not_loaded)
 end
