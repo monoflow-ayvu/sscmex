@@ -86,6 +86,12 @@ defmodule SSCMEx.Nif do
   def camera_stop_stream(_camera_resource), do: :erlang.nif_error(:nif_not_loaded)
   def camera_is_streaming(_camera_resource), do: :erlang.nif_error(:nif_not_loaded)
   def camera_retrieve_frame(_camera_resource, _format), do: :erlang.nif_error(:nif_not_loaded)
+
+  def camera_try_retrieve_frame(_camera_resource, _channel),
+    do: :erlang.nif_error(:nif_not_loaded)
+
+  def camera_retrieve_latest_frame(_camera_resource, _channel),
+    do: :erlang.nif_error(:nif_not_loaded)
   def camera_set_ctrl(_camera_resource, _ctrl, _value), do: :erlang.nif_error(:nif_not_loaded)
   def camera_get_ctrl(_camera_resource, _ctrl), do: :erlang.nif_error(:nif_not_loaded)
   def camera_get_id(_camera_resource), do: :erlang.nif_error(:nif_not_loaded)

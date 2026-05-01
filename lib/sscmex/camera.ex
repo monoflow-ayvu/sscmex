@@ -261,23 +261,70 @@ defmodule SSCMEx.Camera do
   """
   @spec retrieve_frame(t(), 0..2) :: {:ok, frame()} | {:error, term()}
   def retrieve_frame(%__MODULE__{resource: resource}, channel) do
-    case SSCMEx.Nif.camera_retrieve_frame(resource, channel) do
-      {:ok, %{width: width, height: height, format: image_format, data: data} = frame_map} ->
-        {:ok,
-         %SSCMEx.Image{
-           width: width,
-           height: height,
-           format: image_format,
-           data: data,
-           size: Map.get(frame_map, :size, byte_size(data)),
-           timestamp: Map.get(frame_map, :timestamp),
-           key: Map.get(frame_map, :key)
-         }}
-
-      error ->
-        error
-    end
+    resource
+    |> SSCMEx.Nif.camera_retrieve_frame(channel)
+    |> wrap_frame_result()
   end
+
+  @doc """
+  Non-blocking variant of `retrieve_frame/2`. Returns
+  `{:error, "queue_empty"}` immediately if the channel queue has no
+  frame ready, instead of waiting up to one frame interval.
+
+  Useful when a consumer wants to drain the chip-side `MessageBox(fps)`
+  queue to its latest frame without paying the per-call wait when the
+  queue runs empty. For most workloads `retrieve_latest_frame/2` is
+  the better primitive — it does the drain entirely in C++.
+  """
+  @spec try_retrieve_frame(t(), 0..2) :: {:ok, frame()} | {:error, term()}
+  def try_retrieve_frame(%__MODULE__{resource: resource}, channel) do
+    resource
+    |> SSCMEx.Nif.camera_try_retrieve_frame(channel)
+    |> wrap_frame_result()
+  end
+
+  @doc """
+  Drain the channel queue and return only the most recent frame.
+
+  Behaves like `retrieve_frame/2` for the first frame (blocks up to
+  one frame interval), then pulls every other queued frame
+  non-blocking and discards the stale ones. The drain runs entirely
+  in C++, so there is no Elixir↔NIF round-trip per discarded frame.
+
+  This is the recommended primitive for low-latency consumers (e.g.
+  a TPU inference loop): end-to-end latency stays bounded by the
+  model's processing time instead of growing with the per-channel
+  `MessageBox(fps)` queue depth.
+
+      {:ok, image} = SSCMEx.Camera.retrieve_latest_frame(camera, 0)
+      # image is the freshest frame currently buffered for CH0
+
+  Returns `{:error, _}` if the channel is not configured / streaming
+  is not active / no frame has arrived within one frame interval.
+  """
+  @spec retrieve_latest_frame(t(), 0..2) :: {:ok, frame()} | {:error, term()}
+  def retrieve_latest_frame(%__MODULE__{resource: resource}, channel) do
+    resource
+    |> SSCMEx.Nif.camera_retrieve_latest_frame(channel)
+    |> wrap_frame_result()
+  end
+
+  defp wrap_frame_result(
+         {:ok, %{width: width, height: height, format: image_format, data: data} = frame_map}
+       ) do
+    {:ok,
+     %SSCMEx.Image{
+       width: width,
+       height: height,
+       format: image_format,
+       data: data,
+       size: Map.get(frame_map, :size, byte_size(data)),
+       timestamp: Map.get(frame_map, :timestamp),
+       key: Map.get(frame_map, :key)
+     }}
+  end
+
+  defp wrap_frame_result(error), do: error
 
   @doc """
   Configure a camera channel before `start_stream/2`.

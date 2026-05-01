@@ -1739,8 +1739,17 @@ static ERL_NIF_TERM camera_is_streaming(ErlNifEnv* env, int argc, const ERL_NIF_
     return make_ok(env, res->val->camera->isStreaming() ? make_atom(env, "true") : make_atom(env, "false"));
 }
 
-// NIF: Retrieve frame from camera (DIRTY IO)
-static ERL_NIF_TERM camera_retrieve_frame(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+// Shared frame-retrieval helper. `mode` selects between the three
+// queue-fetch behaviours (blocking / non-blocking / drain-to-latest).
+// Keeps the binary-allocation + map-build path in one place so the
+// three NIF entry points stay thin.
+enum class RetrieveMode {
+    Blocking,    // wait up to one frame interval (legacy retrieve_frame)
+    NonBlocking, // return MA_AGAIN immediately if queue empty
+    Latest,      // block for first frame, then drain to most recent
+};
+
+static ERL_NIF_TERM do_camera_retrieve(ErlNifEnv* env, const ERL_NIF_TERM argv[], RetrieveMode mode) {
     auto* res = NifRes<CameraRes>::get(env, argv[0]);
     if (!res || !res->val || !res->val->camera) return make_error(env, "invalid_resource");
 
@@ -1753,9 +1762,14 @@ static ERL_NIF_TERM camera_retrieve_frame(ErlNifEnv* env, int argc, const ERL_NI
     ma_img_t frame;
     // CameraRes always holds a CameraSG200X on this hardware.
     auto* sg200x = static_cast<ma::CameraSG200X*>(res->val->camera);
-    ma_err_t err = sg200x->retrieveChannel(frame, channel_idx);
+    ma_err_t err = MA_OK;
+    switch (mode) {
+        case RetrieveMode::Blocking:    err = sg200x->retrieveChannel(frame, channel_idx); break;
+        case RetrieveMode::NonBlocking: err = sg200x->tryRetrieveChannel(frame, channel_idx); break;
+        case RetrieveMode::Latest:      err = sg200x->retrieveLatestChannel(frame, channel_idx); break;
+    }
     if (err != MA_OK) {
-        return make_error(env, "retrieve_frame_failed");
+        return make_error(env, err == MA_AGAIN ? "queue_empty" : "retrieve_frame_failed");
     }
 
     // Create binary from frame data (copy - frame ownership is with camera)
@@ -1780,6 +1794,27 @@ static ERL_NIF_TERM camera_retrieve_frame(ErlNifEnv* env, int argc, const ERL_NI
     enif_make_map_put(env, map, make_atom(env, "key"), frame.key ? make_atom(env, "true") : make_atom(env, "false"), &map);
 
     return make_ok(env, map);
+}
+
+// NIF: Retrieve frame from camera (DIRTY IO)
+static ERL_NIF_TERM camera_retrieve_frame(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    return do_camera_retrieve(env, argv, RetrieveMode::Blocking);
+}
+
+// NIF: Non-blocking retrieve. Returns `{:error, "queue_empty"}` if no
+// frame is currently buffered. Useful for consumer-side draining
+// without paying the per-call wait cost.
+static ERL_NIF_TERM camera_try_retrieve_frame(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    return do_camera_retrieve(env, argv, RetrieveMode::NonBlocking);
+}
+
+// NIF: Drain-to-latest retrieve. Blocks for the first frame (up to
+// one frame interval), then pulls everything else non-blocking and
+// discards stale frames, returning only the most recent. Single
+// NIF call → minimal Elixir↔NIF overhead and minimal end-to-end
+// latency on consumers like a YOLO inference loop.
+static ERL_NIF_TERM camera_retrieve_latest_frame(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    return do_camera_retrieve(env, argv, RetrieveMode::Latest);
 }
 
 // NIF: Set camera control
@@ -2360,6 +2395,8 @@ static ErlNifFunc nif_functions[] = {
     {"camera_stop_stream", 1, camera_stop_stream, ERL_NIF_DIRTY_JOB_IO_BOUND},
     {"camera_is_streaming", 1, camera_is_streaming, 0},
     {"camera_retrieve_frame", 2, camera_retrieve_frame, ERL_NIF_DIRTY_JOB_IO_BOUND},
+    {"camera_try_retrieve_frame", 2, camera_try_retrieve_frame, ERL_NIF_DIRTY_JOB_IO_BOUND},
+    {"camera_retrieve_latest_frame", 2, camera_retrieve_latest_frame, ERL_NIF_DIRTY_JOB_IO_BOUND},
     {"camera_set_ctrl", 3, camera_set_ctrl, 0},
     {"camera_get_ctrl", 2, camera_get_ctrl, 0},
     {"camera_get_id", 1, camera_get_id, 0},

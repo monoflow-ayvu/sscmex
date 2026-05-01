@@ -41,6 +41,21 @@ public:
 
     ma_err_t retrieveFrame(ma_img_t& frame, ma_pixel_format_t format) noexcept override;
     ma_err_t retrieveChannel(ma_img_t& frame, int channel_idx) noexcept;
+
+    // Non-blocking variant: returns MA_AGAIN immediately if the channel
+    // queue is empty. Useful for consumers that want to drain the
+    // chip-side `MessageBox(fps)` queue to its latest frame without
+    // waiting for the next sensor tick.
+    ma_err_t tryRetrieveChannel(ma_img_t& frame, int channel_idx) noexcept;
+
+    // Drains the channel queue and returns only the most recent frame.
+    // Blocks up to one frame interval for the first frame (so it
+    // behaves like `retrieveChannel` when the queue is empty), then
+    // pulls everything else non-blocking, discarding stale frames.
+    // Equivalent to a tight "fetch latest" loop done in C++ — no
+    // Elixir↔NIF round-trip per discarded frame.
+    ma_err_t retrieveLatestChannel(ma_img_t& frame, int channel_idx) noexcept;
+
     void returnFrame(ma_img_t& frame) noexcept override;
     void setChannelVencParams(int ch, const video_venc_params_t& params) noexcept;
 

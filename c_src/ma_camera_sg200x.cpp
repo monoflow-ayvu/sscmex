@@ -434,6 +434,78 @@ ma_err_t CameraSG200X::retrieveChannel(ma_img_t& frame, int channel_idx) noexcep
     return MA_OK;
 }
 
+ma_err_t CameraSG200X::tryRetrieveChannel(ma_img_t& frame, int channel_idx) noexcept {
+    if (!m_streaming) [[unlikely]] {
+        return MA_EPERM;
+    }
+    if (channel_idx < 0 || channel_idx >= CHN_MAX) {
+        return MA_EINVAL;
+    }
+    if (!m_channels[channel_idx].enabled) [[unlikely]] {
+        return MA_EPERM;
+    }
+
+    ma_img_t* img = nullptr;
+    // timeout=0 → return immediately if queue empty.
+    if (!m_channels[channel_idx].queue->fetch(reinterpret_cast<void**>(&img), 0)) {
+        return MA_AGAIN;
+    }
+
+    if (img != nullptr) {
+        frame = *img;
+        delete img;
+    }
+
+    return MA_OK;
+}
+
+ma_err_t CameraSG200X::retrieveLatestChannel(ma_img_t& frame, int channel_idx) noexcept {
+    if (!m_streaming) [[unlikely]] {
+        return MA_EPERM;
+    }
+    if (channel_idx < 0 || channel_idx >= CHN_MAX) {
+        return MA_EINVAL;
+    }
+    if (!m_channels[channel_idx].enabled) [[unlikely]] {
+        return MA_EPERM;
+    }
+
+    auto& ch = m_channels[channel_idx];
+
+    // First fetch is blocking (up to one frame interval) so the caller
+    // doesn't spin when the queue is genuinely empty.
+    ma_img_t* latest = nullptr;
+    if (!ch.queue->fetch(reinterpret_cast<void**>(&latest), Tick::fromMilliseconds(1000 / ch.fps))) {
+        return MA_AGAIN;
+    }
+
+    // Then drain everything else non-blocking, discarding stale frames.
+    // Frames in the SG200X video pipeline are heap-allocated (`new
+    // ma_img_t`); each discarded frame must release both the buffer
+    // (via `returnFrame` semantics — for non-physical buffers, delete
+    // the data) and the wrapper. For physical buffers the underlying
+    // memory is owned by VPSS/VENC and only the `ma_img_t` wrapper is
+    // ours to free.
+    ma_img_t* newer = nullptr;
+    while (ch.queue->fetch(reinterpret_cast<void**>(&newer), 0)) {
+        if (latest != nullptr) {
+            if (!latest->physical) {
+                delete[] latest->data;
+            }
+            delete latest;
+        }
+        latest = newer;
+        newer = nullptr;
+    }
+
+    if (latest != nullptr) {
+        frame = *latest;
+        delete latest;
+    }
+
+    return MA_OK;
+}
+
 void CameraSG200X::returnFrame(ma_img_t& frame) noexcept {
     if (!frame.physical) {
         delete[] frame.data;
