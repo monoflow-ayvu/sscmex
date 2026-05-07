@@ -14,10 +14,30 @@ Add `sscmex` to your dependencies:
 ```elixir
 def deps do
   [
-    {:sscmex, "~> 0.1.0"}
+    {:sscmex, "~> 0.4.0"}
   ]
 end
 ```
+
+`SSCMEx` ships precompiled NIFs for `riscv64-linux-musl` (Nerves target
+`nerves_system_sg2002`) on every tagged GitHub release. Hex consumers
+get the precompiled artefact automatically; nothing else needs to be on
+the build host.
+
+### Building from source
+
+Source builds require the SG2002 SDK, because SSCMA-Micro's CVI engine
+header `#include <cviruntime.h>` only ships with the CVITEK TPU SDK.
+
+If `mix deps.compile sscmex` ever falls back to a source build (typical
+trigger: pinning to a git branch instead of a Hex version), you'll get a
+clear `FATAL_ERROR` from cmake telling you to either:
+
+- run inside the `sscmex` devenv (provides the SDK automatically), or
+- set `SG200X_SDK_PATH` to an extracted [reCameraOS SDK
+  release](https://github.com/Seeed-Studio/reCamera-OS/releases), or
+- pin to a tagged Hex/Git release that has matching precompiled NIFs in
+  its GitHub release assets, so `cc_precompiler` can skip the build.
 
 ## Precompiled NIF target selection
 

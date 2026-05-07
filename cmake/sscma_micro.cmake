@@ -9,6 +9,41 @@ if(NOT EXISTS "${SSCMA_MICRO_DIR}/sscma")
     message(FATAL_ERROR "SSCMA-Micro not found at: ${SSCMA_MICRO_DIR}. Run: git submodule update --init")
 endif()
 
+# Fail fast when the SG2002 SDK isn't available. SSCMA-Micro's CVI engine
+# header unconditionally `#include <cviruntime.h>` whenever
+# MA_USE_ENGINE_CVI=1 is set, and that header only ships with the CVITEK
+# TPU SDK (under $SG200X_SDK_PATH/install/.../cvitek_tpu_sdk/include).
+# Without this guard the build dies later with a confusing
+# "cviruntime.h: No such file or directory" deep inside SSCMA-Micro.
+#
+# Consumers building from source are expected to run inside the sscmex
+# devenv (which downloads reCameraOS_sdk_v0.2.0.tar.gz) or to point
+# SG200X_SDK_PATH at an existing extraction. In package consumers that
+# don't have the SDK on the host, the recommended path is to take the
+# precompiled NIF from a tagged GitHub release (cc_precompiler will fetch
+# it automatically when checksum.exs is present).
+if(NOT DEFINED SG200X_SDK_PATH OR "${SG200X_SDK_PATH}" STREQUAL "")
+    message(FATAL_ERROR
+        "SG200X_SDK_PATH is not set, but SSCMA-Micro's CVI engine "
+        "(MA_USE_ENGINE_CVI=1) requires <cviruntime.h> from the CVITEK "
+        "TPU SDK.\n"
+        "  Fix one of:\n"
+        "    1. Use the sscmex devenv (provides the SDK automatically):\n"
+        "         direnv allow   # or: devenv shell\n"
+        "    2. Point SG200X_SDK_PATH at an extracted reCameraOS SDK,\n"
+        "       e.g. download reCameraOS_sdk_v0.2.0.tar.gz from\n"
+        "       https://github.com/Seeed-Studio/reCamera-OS/releases\n"
+        "       and set:\n"
+        "         export SG200X_SDK_PATH=/path/to/sg2002_recamera_emmc\n"
+        "    3. Use the precompiled NIF from a GitHub release. In your\n"
+        "       parent project, ensure a checksum.exs is present (Hex\n"
+        "       packaging includes one automatically; for git deps, add\n"
+        "       the checksum.exs from the matching release as a dep\n"
+        "       overlay) so cc_precompiler can fetch the precompiled\n"
+        "       artefact instead of building from source."
+    )
+endif()
+
 message(STATUS "SSCMA-Micro found at: ${SSCMA_MICRO_DIR}")
 
 # Include directories for SSCMA-Micro
