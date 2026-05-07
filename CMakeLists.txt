@@ -76,6 +76,7 @@ include_directories("${C_SRC}/sophgo/common")
 set(SOURCE_FILES
     "${C_SRC}/sscmex_nif.cpp"
     "${C_SRC}/sscma_porting.cpp"
+    "${C_SRC}/sscma_yolov7.cpp"
     "${C_SRC}/ma_device.cpp"
     "${C_SRC}/ma_camera_sg200x.cpp"
 )
