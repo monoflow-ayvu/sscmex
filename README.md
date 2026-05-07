@@ -94,7 +94,9 @@ Process.sleep(1500)
 
 # 5) Grab frame and run inference
 # retrieve_frame already returns %SSCMEx.Image{}
-{:ok, image} = SSCMEx.Camera.retrieve_frame(camera, :rgb888)
+# (second arg is the channel index 0..2, not a format — format was set
+#  by set_ctrl(:format, :rgb888) above.)
+{:ok, image} = SSCMEx.Camera.retrieve_frame(camera, 0)
 {:ok, results} = SSCMEx.Model.run(model, image)
 {:ok, perf} = SSCMEx.Model.get_perf(model)
 
