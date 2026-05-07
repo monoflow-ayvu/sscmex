@@ -10,13 +10,13 @@ with all weights inlined — exactly what `tpu_mlir==1.7` (and the
 
 Why we strip post-processing
 ----------------------------
-The default `python export.py --weights safety.pt --grid` graph embeds
-sigmoid + anchor decoding into ONNX using `ScatterND` and dynamic slices.
-TPU-MLIR's cv181x backend either rejects those or compiles them into very
-slow CPU fallbacks. By setting `Detect.export = True` (or `IDetect.export
-= True` on heavy YOLOv7 variants), `forward()` short-circuits and just
-returns the three permuted Conv outputs `[1, 3, H, W, 5+nc]`. The runtime
-side (sscmex/c_src/sscma_yolov7.cpp) handles the remaining math.
+YOLOv7's default `--grid` ONNX graph embeds sigmoid + anchor decoding
+using `ScatterND` and dynamic slices. TPU-MLIR's cv181x backend either
+rejects those or compiles them into very slow CPU fallbacks. By setting
+`Detect.export = True` (or `IDetect.export = True` on heavy YOLOv7
+variants), `forward()` short-circuits and just returns the three
+permuted Conv outputs `[1, 3, H, W, 5+nc]`. The runtime side
+(sscmex/c_src/sscma_yolov7.cpp) handles the remaining math.
 
 Usage
 -----
@@ -28,10 +28,10 @@ sys.path to deserialize the checkpoint:
 Then:
 
     python scripts/yolov7_pt_to_clean_onnx.py \\
-        --pt   /path/to/safety.pt \\
-        --out  /path/to/safety_clean.onnx \\
+        --pt   /path/to/model.pt \\
+        --out  /path/to/model_clean.onnx \\
         --yolov7-repo /tmp/yolov7 \\
-        --classes-json /path/to/safety_map.json
+        --classes-json /path/to/classes.json
 
 Notes
 -----

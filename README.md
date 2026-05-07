@@ -116,10 +116,10 @@ the loaded cvimodel exposes the three raw Conv heads at `[1, 3, H, W,
    git clone --depth 1 https://github.com/WongKinYiu/yolov7.git /tmp/yolov7
    pip install torch onnx
    python scripts/yolov7_pt_to_clean_onnx.py \
-       --pt   safety.pt \
-       --out  safety_clean.onnx \
+       --pt   model.pt \
+       --out  model_clean.onnx \
        --yolov7-repo /tmp/yolov7 \
-       --classes-json safety_map.json
+       --classes-json classes.json
    ```
 
    The result is a self-contained ONNX (weights inlined) at IR v8 / opset
@@ -130,11 +130,8 @@ the loaded cvimodel exposes the three raw Conv heads at `[1, 3, H, W,
 2. **Run TPU-MLIR inside the official Docker container.** The Sophgo
    `tpuc_dev:v3.1` image is required (newer glibc than most hosts; the
    pip install bundle's `libc.so.6` only works in that image). Drop a
-   directory of representative calibration images alongside the ONNX
-   (the [PPE-YOLOv8 dataset on
-   Kaggle](https://www.kaggle.com/datasets/shlokraval/ppe-dataset-yolov8)
-   is a good source for the safety model — pick ~100 images covering
-   lighting and pose variety), then:
+   directory of ~100 representative calibration images alongside the
+   ONNX, then:
 
    ```bash
    docker run --privileged --rm -it \
@@ -142,23 +139,23 @@ the loaded cvimodel exposes the three raw Conv heads at `[1, 3, H, W,
        sophgo/tpuc_dev:v3.1 \
        bash -lc 'pip install tpu_mlir[all]==1.7 && \
            bash scripts/build_yolov7_cvimodel.sh \
-               --onnx safety_clean.onnx \
+               --onnx model_clean.onnx \
                --calib-dir ./calib_imgs \
-               --name safety'
+               --name model'
    ```
 
    The script wraps `model_transform.py` → `run_calibration.py` →
-   `model_deploy.py` with the Seeed-recommended INT8 flags (`--quant_input
+   `model_deploy.py` with INT8 flags (`--quant_input
    --customization_format RGB_PACKED --fuse_preprocess --aligned_input
-   --processor cv181x`). It produces `safety_int8.cvimodel`.
+   --processor cv181x`). It produces `model_int8.cvimodel`.
 
-3. **Flash and use.** Copy `safety_int8.cvimodel` to `/data` on the
+3. **Flash and use.** Copy `model_int8.cvimodel` to `/data` on the
    reCamera, then in IEx the standard `SSCMEx.Model` API works
    unmodified:
 
    ```elixir
    {:ok, engine} = SSCMEx.Engine.new()
-   :ok = SSCMEx.Engine.load(engine, "/data/safety_int8.cvimodel")
+   :ok = SSCMEx.Engine.load(engine, "/data/model_int8.cvimodel")
    {:ok, model} = SSCMEx.Model.create(engine)
    {:ok, :yolov7} = SSCMEx.Model.get_type(model)
 
@@ -170,12 +167,13 @@ the loaded cvimodel exposes the three raw Conv heads at `[1, 3, H, W,
    Detections come back in the same `%{x, y, w, h, score, target}` shape
    as `:yolov5`, so any downstream code that handles YOLOv5 detections
    handles these. The class index `target` follows the order in the
-   `.pt`'s `model.names` (which may differ from `safety_map.json` —
-   verify with the metadata file produced in step 1).
+   `.pt`'s `model.names`; the metadata JSON produced alongside the
+   cleaned ONNX records that order for reference.
 
 If you only have the ONNX (no `.pt`), `scripts/yolov7_to_clean_onnx.py`
-performs the equivalent surgery on an existing ONNX. It needs the original
-`.onnx.data` external-weights file alongside; the `.pt` route is simpler.
+performs the equivalent surgery on an existing ONNX. It needs the
+matching `.onnx.data` external-weights file alongside; the `.pt` route
+is simpler.
 
 ## Notes
 

@@ -11,28 +11,24 @@
 #
 #   git clone --depth 1 https://github.com/WongKinYiu/yolov7.git /tmp/yolov7
 #   python scripts/yolov7_pt_to_clean_onnx.py \
-#       --pt safety.pt --out safety_clean.onnx \
-#       --yolov7-repo /tmp/yolov7 \
-#       --classes-json safety_map.json
+#       --pt model.pt --out model_clean.onnx \
+#       --yolov7-repo /tmp/yolov7
 #
 #   docker run --privileged --rm -it \
 #       -v "$PWD":/workspace -w /workspace \
 #       sophgo/tpuc_dev:v3.1 \
 #       bash -lc 'pip install tpu_mlir[all]==1.7 && \
 #           bash scripts/build_yolov7_cvimodel.sh \
-#               --onnx safety_clean.onnx \
+#               --onnx model_clean.onnx \
 #               --calib-dir ./calib_imgs \
-#               --name safety'
+#               --name model'
 #
 # Inputs
 # ------
 #   --onnx       Cleaned ONNX (from scripts/yolov7_pt_to_clean_onnx.py)
-#   --calib-dir  Directory of representative JPEGs/PNGs (~100 images is the
-#                Seeed-recommended count). Anchor a few from your real
-#                deployment scene. The PPE dataset at
-#                https://www.kaggle.com/datasets/shlokraval/ppe-dataset-yolov8
-#                works well for the safety model.
-#   --name       Output basename (e.g. "safety" -> safety_int8.cvimodel)
+#   --calib-dir  Directory of ~100 representative JPEGs/PNGs from the
+#                deployment scene.
+#   --name       Output basename (e.g. "model" -> model_int8.cvimodel)
 #   --shape      Optional, defaults to "[[1,3,640,640]]"
 #   --processor  cv181x | cv182x | cv183x  (cv181x = SG2002)  [default cv181x]
 #   --quantize   INT8 | F16  [default INT8 — INT8 is required for SG2002 perf]

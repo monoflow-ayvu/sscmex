@@ -16,11 +16,9 @@ using ma::model::Detector;
 
 namespace {
 
-// Standard YOLOv7 P3/P4/P5 anchor priors (input-image pixel space). They
-// were extracted from the original safety.onnx initializers (`select_1`,
-// `select_3`, `select_5`); see scripts/yolov7_to_clean_onnx.py for how
-// they're written to the metadata.json. If you train/finetune YOLOv7 with
-// custom anchors, edit the values here to match.
+// Standard YOLOv7 P3/P4/P5 anchor priors (input-image pixel space).
+// Edit to match if you train/finetune YOLOv7 with custom anchors — verify
+// against `model.model[-1].anchor_grid` from your .pt.
 constexpr float kAnchors[3][3][2] = {
     {{ 12.f,  16.f}, { 19.f,  36.f}, { 40.f,  28.f}},  // stride 8  (P3)
     {{ 36.f,  75.f}, { 76.f,  55.f}, { 72.f, 146.f}},  // stride 16 (P4)

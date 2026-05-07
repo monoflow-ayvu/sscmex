@@ -13,20 +13,17 @@ refuses to compile or compiles into very slow CPU fallbacks.
 
 This tool rewrites the ONNX so that the graph stops at the three raw Conv
 heads (P3/P4/P5, before any sigmoid). Anchor decoding is then performed at
-runtime by `SSCMEx.YoloV7` in Elixir.
+runtime by the in-tree YoloV7 decoder in `c_src/sscma_yolov7.cpp`.
 
 Inputs/outputs
 --------------
 The script reads:
-    safety.onnx          (and any external data file referenced inside)
-    safety.pt            (optional — only used to *verify* anchors match;
-                          the script does not need to run torch unless this
-                          flag is given)
+    model.onnx           (and any external data file referenced inside)
 
 It produces, next to the input file:
-    safety_clean.onnx                — graph: images -> {head_p3, head_p4, head_p5}
-    safety_clean.onnx.data           — external weights (if input had any)
-    safety_clean.metadata.json       — anchors / strides / class names
+    model_clean.onnx                — graph: images -> {head_p3, head_p4, head_p5}
+    model_clean.onnx.data           — external weights (if input had any)
+    model_clean.metadata.json       — anchors / strides / class names
 
 Note about external data
 ------------------------
@@ -39,16 +36,14 @@ embed the weights directly (requires the original `.data` file present).
 Usage
 -----
     python scripts/yolov7_to_clean_onnx.py \
-        --in  /path/to/safety.onnx \
-        --out /path/to/safety_clean.onnx \
-        --classes Hardhat Mask "Safety Vest" NO-Hardhat NO-Mask \
-                  "NO-Safety Vest" Person machinery vehicle "Safety Cone"
+        --in  /path/to/model.onnx \
+        --out /path/to/model_clean.onnx \
+        --classes class0 class1 ... classN
 
-    # Or load class names from a JSON map (the format produced alongside
-    # the model — keys are classes, in order).
+    # Or load class names from a JSON map (keys in training order):
     python scripts/yolov7_to_clean_onnx.py \
-        --in safety.onnx --out safety_clean.onnx \
-        --classes-json safety_map.json
+        --in model.onnx --out model_clean.onnx \
+        --classes-json classes.json
 """
 
 import argparse
@@ -303,7 +298,7 @@ def main():
         epilog=__doc__,
     )
     ap.add_argument("--in", dest="in_path", required=True,
-                    help="Input safety.onnx (with --grid post-processing)")
+                    help="Input ONNX (with --grid post-processing)")
     ap.add_argument("--out", dest="out_path", required=True,
                     help="Output cleaned ONNX path")
     ap.add_argument("--classes", nargs="*", default=None,
