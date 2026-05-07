@@ -53,10 +53,10 @@ YoloV7::YoloV7(Engine* engine)
     input_h_ = static_cast<int32_t>(img_.height);
 
     // Try to look the heads up by name first (matches the names emitted by
-    // scripts/yolov7_to_clean_onnx.py: head_p3, head_p4, head_p5). Some
-    // toolchains rewrite output names during cvimodel compilation — if we
-    // don't get a hit on the canonical names, fall back to sorting by
-    // feature-map size (largest grid -> P3 -> stride 8).
+    // scripts/yolov7_to_clean_onnx.py: head_p3, head_p4, head_p5). The
+    // cvimodel runtime appends suffixes like `_Transpose_f32`, so a strict
+    // name match will usually miss; we fall back to sorting outputs by
+    // grid-cell count (largest -> P3 -> stride 8).
     int32_t order[kNumScales] = {-1, -1, -1};
     order[0] = engine->getOutputNum("head_p3");
     order[1] = engine->getOutputNum("head_p4");
@@ -66,6 +66,48 @@ YoloV7::YoloV7(Engine* engine)
                        order[0] != order[1] && order[1] != order[2] &&
                        order[0] != order[2]);
 
+    auto grid_h_of = [](const ma_shape_t& sh) -> int32_t {
+        // rank-5: [1, 3, H, W, 5+nc]   (raw ONNX layout)
+        // rank-4: [1, 3, H, W*(5+nc)]  (cvimodel collapses the last two)
+        if (sh.size == 5) return sh.dims[2];
+        if (sh.size == 4) return sh.dims[2];
+        return 0;
+    };
+    auto grid_w_of = [](const ma_shape_t& sh, int32_t num_features) -> int32_t {
+        if (sh.size == 5) return sh.dims[3];
+        if (sh.size == 4 && num_features > 0) return sh.dims[3] / num_features;
+        return 0;
+    };
+
+    // Determine num_class from the largest output: square grid, so
+    //   nf == dims[last] / grid_h   (rank-4)  or
+    //   nf == dims[4]               (rank-5)
+    // Pick the output with the largest dims[2]*(dims[last]/...) to be safe.
+    {
+        const int32_t out_count = engine->getOutputSize();
+        int32_t pick = 0;
+        int32_t max_cells = -1;
+        for (int32_t i = 0; i < out_count && i < kNumScales; ++i) {
+            const auto sh = engine->getOutputShape(i);
+            const int32_t h = grid_h_of(sh);
+            int32_t cells = h * h;  // assume square
+            if (cells > max_cells) {
+                max_cells = cells;
+                pick = i;
+            }
+        }
+        const auto big = engine->getOutputShape(pick);
+        const int32_t h = grid_h_of(big);
+        int32_t nf = 0;
+        if (big.size == 5) {
+            nf = big.dims[4];
+        } else if (big.size == 4 && h > 0) {
+            // Square grid: dims[3] = W * nf = h * nf  =>  nf = dims[3] / h
+            nf = big.dims[3] / h;
+        }
+        num_class_ = nf - kBoxFields;
+    }
+
     if (!by_name_ok) {
         struct Info { int32_t idx; int32_t cells; };
         Info infos[kNumScales];
@@ -73,9 +115,8 @@ YoloV7::YoloV7(Engine* engine)
         const int n = (out_count < kNumScales) ? out_count : kNumScales;
         for (int32_t i = 0; i < n; ++i) {
             const auto sh = engine->getOutputShape(i);
-            const int32_t H = sh.size >= 5 ? sh.dims[2] : 0;
-            const int32_t W = sh.size >= 5 ? sh.dims[3] : 0;
-            infos[i] = {i, H * W};
+            const int32_t H = grid_h_of(sh);
+            infos[i] = {i, H * H};  // square grid
         }
         std::sort(infos, infos + n,
                   [](const Info& a, const Info& b) { return a.cells > b.cells; });
@@ -86,20 +127,14 @@ YoloV7::YoloV7(Engine* engine)
         Scale& sc = scales_[s];
         sc.tensor   = engine->getOutput(order[s]);
         const auto& sh = sc.tensor.shape;
-        // Expected layout [1, 3, H, W, 5+nc]
-        sc.grid_h = sh.dims[2];
-        sc.grid_w = sh.dims[3];
+        sc.grid_h = grid_h_of(sh);
+        sc.grid_w = grid_w_of(sh, kBoxFields + num_class_);
 
         // Stride is input_w / grid_w when feature map is in normal NCHW
         // order. Square inputs are standard for YOLOv7.
         sc.stride = (sc.grid_w > 0)
                         ? (input_w_ / sc.grid_w)
                         : (s == 0 ? 8 : (s == 1 ? 16 : 32));
-
-        if (s == 0) {
-            // last dim = 5 + nc
-            num_class_ = sh.dims[4] - kBoxFields;
-        }
 
         for (int a = 0; a < kAnchorsPerCell; ++a) {
             sc.anchors[a][0] = kAnchors[s][a][0];
@@ -126,32 +161,43 @@ bool YoloV7::isValid(Engine* engine) {
     if (!nhwc) std::swap(h, c);
     if (n != 1 || h < 32 || h % 32 != 0 || (c != 3 && c != 1)) return false;
 
-    // Sum of cells across the three scales must equal what 8/16/32 strides
-    // would produce on an HxW input. This guards against misshaped models
-    // sneaking into our path.
+    // Output may be reported as either:
+    //   rank-5: [1, 3, H, W, 5+nc]   (raw ONNX layout)
+    //   rank-4: [1, 3, H, W*(5+nc)]  (cvimodel collapses last two dims)
+    // We accept both. For the rank-4 case we assume square grids
+    // (W == H), which is the normal YOLOv7 layout for square inputs.
+    int32_t total_cells = 0;
+    int32_t last_nf     = -1;
+    for (int32_t i = 0; i < kNumScales; ++i) {
+        const auto sh = engine->getOutputShape(i);
+        if (sh.size != 4 && sh.size != 5)            return false;
+        if (sh.dims[0] != 1)                          return false;
+        if (sh.dims[1] != kAnchorsPerCell)            return false;
+        if (sh.dims[2] <= 0 || sh.dims[3] <= 0)       return false;
+
+        int32_t grid_h = sh.dims[2];
+        int32_t grid_w = 0;
+        int32_t nf     = 0;
+        if (sh.size == 5) {
+            grid_w = sh.dims[3];
+            nf     = sh.dims[4];
+        } else {
+            // rank-4: dims[3] = grid_w * nf. Assume square grid.
+            grid_w = grid_h;
+            if (grid_w == 0 || sh.dims[3] % grid_w != 0) return false;
+            nf = sh.dims[3] / grid_w;
+        }
+        if (nf < (kBoxFields + 1) || nf > (kBoxFields + 80)) return false;
+        if (last_nf < 0) last_nf = nf;
+        else if (last_nf != nf)                   return false;
+
+        total_cells += grid_h * grid_w;
+    }
+
     const int32_t hs8  = h / 8,  ws8  = w / 8;
     const int32_t hs16 = h / 16, ws16 = w / 16;
     const int32_t hs32 = h / 32, ws32 = w / 32;
     const int32_t expected_cells = hs8 * ws8 + hs16 * ws16 + hs32 * ws32;
-
-    int32_t total_cells     = 0;
-    int32_t last_class_dim  = -1;
-    for (int32_t i = 0; i < kNumScales; ++i) {
-        const auto sh = engine->getOutputShape(i);
-        if (sh.size != 5) return false;
-        if (sh.dims[0] != 1)              return false;
-        if (sh.dims[1] != kAnchorsPerCell) return false;
-        if (sh.dims[2] <= 0 || sh.dims[3] <= 0) return false;
-        if (sh.dims[4] < (kBoxFields + 1)  || sh.dims[4] > (kBoxFields + 80)) return false;
-
-        if (last_class_dim < 0) {
-            last_class_dim = sh.dims[4];
-        } else if (last_class_dim != sh.dims[4]) {
-            return false;
-        }
-
-        total_cells += sh.dims[2] * sh.dims[3];
-    }
     return total_cells == expected_cells;
 }
 
