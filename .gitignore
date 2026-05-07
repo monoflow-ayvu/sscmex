@@ -63,3 +63,7 @@ priv/*.so
 priv/lib/*.so
 priv/lib/*.so.*
 cmake_build
+
+# Local conversion outputs (large binary models, regenerated on demand
+# via scripts/yolov7_pt_to_clean_onnx.py and scripts/build_yolov7_cvimodel.sh)
+build_artifacts/
