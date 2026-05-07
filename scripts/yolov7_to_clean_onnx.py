@@ -147,24 +147,101 @@ def collect_reachable(model: onnx.ModelProto, head_names):
 
 
 def extract_anchors(model: onnx.ModelProto):
-    """Pull anchor constants out of the original graph if present.
+    """Pull per-stride anchor priors out of the graph.
 
-    YOLOv7 export emits initializers named like `select_1`, `select_3`,
-    `select_5` of shape [1, 3, 1, 1, 2] — we read those.  Falls back to
-    DEFAULT_ANCHORS if not found.
+    YOLOv7 export emits three initializers of shape [1, 3, 1, 1, 2] — one
+    per detection scale. Pairing them with the right stride matters: the
+    runtime decoder hard-codes anchors per scale, so a mis-ordered metadata
+    JSON would silently disagree with the C++ table.
+
+    We pair anchor -> stride by walking the graph forward from each anchor
+    initializer until we hit a Reshape op whose target shape contains a
+    grid dimension (input_h / 8, /16, or /32). That's the scale the anchor
+    operates on. Falls back to magnitude-sort + warning, then DEFAULT
+    anchors, when the graph trace fails (e.g. for non-standard exports).
     """
-    found = []
-    for init in model.graph.initializer:
-        if list(init.dims) == [1, 3, 1, 1, 2] and init.data_type == onnx.TensorProto.FLOAT:
-            arr = numpy_helper.to_array(init).reshape(3, 2)
-            found.append((init.name, [(float(a), float(b)) for a, b in arr]))
-    if len(found) >= 3:
-        # Order them by mean magnitude (smallest anchors -> P3, largest -> P5)
-        found.sort(key=lambda f: sum(a + b for a, b in f[1]))
-        return [f[1] for f in found[:3]]
-    print("[warn] anchor constants not found in graph; using YOLOv7 defaults",
-          file=sys.stderr)
-    return DEFAULT_ANCHORS
+    # Build name lookups for traversal
+    producer = {}
+    consumers = {}
+    for n in model.graph.node:
+        for o in n.output:
+            producer[o] = n
+        for inp in n.input:
+            consumers.setdefault(inp, []).append(n)
+    inits = {init.name: init for init in model.graph.initializer}
+
+    anchor_inits = [
+        (init.name, [(float(a), float(b))
+                     for a, b in numpy_helper.to_array(init).reshape(3, 2)])
+        for init in model.graph.initializer
+        if list(init.dims) == [1, 3, 1, 1, 2]
+        and init.data_type == onnx.TensorProto.FLOAT
+    ]
+    if len(anchor_inits) < 3:
+        print("[warn] anchor constants not found in graph; using YOLOv7 defaults",
+              file=sys.stderr)
+        return DEFAULT_ANCHORS
+
+    def is_stride_scalar(init):
+        """An f32 scalar in {8, 16, 32} — that's a YOLOv7 stride constant."""
+        if init.data_type != onnx.TensorProto.FLOAT or len(init.dims) != 0:
+            return None
+        v = float(numpy_helper.to_array(init).item())
+        return int(v) if v in (8.0, 16.0, 32.0) else None
+
+    def stride_for_anchor(anchor_name, max_hops=30):
+        """Each anchor is consumed by `Mul(pow(...), anchor)` whose other
+        input traces back through the scale's decoding chain. That chain
+        contains the stride scalar (8/16/32) one or two ops upstream of
+        the grid Mul. Walk both forward (find the consumer Mul) and
+        backward (find the stride scalar) to identify the scale."""
+        # Forward: find the Mul that consumes the anchor
+        anchor_muls = [c for c in consumers.get(anchor_name, [])
+                       if c.op_type == "Mul"]
+        if not anchor_muls:
+            return None
+
+        # Backward from the Mul's other input(s), looking for a stride scalar
+        for mul in anchor_muls:
+            roots = [inp for inp in mul.input if inp != anchor_name]
+            visited, queue = set(), [(r, 0) for r in roots]
+            while queue:
+                t, depth = queue.pop(0)
+                if depth > max_hops or t in visited:
+                    continue
+                visited.add(t)
+                if t in inits:
+                    s = is_stride_scalar(inits[t])
+                    if s is not None:
+                        return s
+                node = producer.get(t)
+                if node is None:
+                    continue
+                for inp in node.input:
+                    queue.append((inp, depth + 1))
+        return None
+
+    paired = []
+    for name, anchors in anchor_inits:
+        stride = stride_for_anchor(name)
+        if stride is not None:
+            paired.append((stride, name, anchors))
+
+    if len(paired) == 3 and {p[0] for p in paired} == {8, 16, 32}:
+        paired.sort(key=lambda p: p[0])  # ascending stride: P3, P4, P5
+        return [p[2] for p in paired]
+
+    # Fallback: magnitude sort with a sanity check.
+    print(f"[warn] anchor->stride graph trace incomplete "
+          f"(paired={len(paired)}/3); falling back to magnitude ordering — "
+          "verify against your training .pt's anchor_grid", file=sys.stderr)
+    by_mag = sorted(anchor_inits[:3],
+                    key=lambda f: sum(a + b for a, b in f[1]))
+    sums = [sum(a + b for a, b in f[1]) for f in by_mag]
+    if not (sums[0] < sums[1] < sums[2]):
+        print(f"[warn] anchor magnitudes too close to order reliably "
+              f"({sums}); double-check P3/P4/P5 mapping", file=sys.stderr)
+    return [f[1] for f in by_mag]
 
 
 def extract_strides(model: onnx.ModelProto):
