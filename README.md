@@ -96,6 +96,85 @@ IO.inspect(perf, label: "perf")
 
 For backward compatibility, detection models still return the same bbox fields (`x`, `y`, `w`, `h`, `score`, `target`).
 
+## YOLOv7 cvimodel workflow
+
+YOLOv7 is supported by an in-tree native decoder (`c_src/sscma_yolov7.cpp`)
+because upstream SSCMA-Micro doesn't ship one. The runtime side is
+automatic — `SSCMEx.Model.create/1` will return a `:yolov7` model whenever
+the loaded cvimodel exposes the three raw Conv heads at `[1, 3, H, W,
+5+nc]`. Building that cvimodel is a 3-step offline pipeline:
+
+1. **Re-export the .pt to a clean ONNX.** YOLOv7's default `--grid` ONNX
+   embeds anchor decoding via `ScatterND`, which TPU-MLIR can't compile
+   well for cv181x. The `scripts/yolov7_pt_to_clean_onnx.py` script
+   re-exports the model with `Detect.export = True`, so the graph stops
+   at the three permuted Conv outputs (raw heads, pre-sigmoid):
+
+   ```bash
+   git clone --depth 1 https://github.com/WongKinYiu/yolov7.git /tmp/yolov7
+   pip install torch onnx
+   python scripts/yolov7_pt_to_clean_onnx.py \
+       --pt   safety.pt \
+       --out  safety_clean.onnx \
+       --yolov7-repo /tmp/yolov7 \
+       --classes-json safety_map.json
+   ```
+
+   The result is a self-contained ONNX (weights inlined) at IR v8 / opset
+   17 — exactly what `tpu_mlir==1.7` accepts, so no `downgrade_onnx.py`
+   step is needed. Outputs are named `head_p3`, `head_p4`, `head_p5`
+   (strides 8, 16, 32).
+
+2. **Run TPU-MLIR inside the official Docker container.** The Sophgo
+   `tpuc_dev:v3.1` image is required (newer glibc than most hosts; the
+   pip install bundle's `libc.so.6` only works in that image). Drop a
+   directory of representative calibration images alongside the ONNX
+   (the [PPE-YOLOv8 dataset on
+   Kaggle](https://www.kaggle.com/datasets/shlokraval/ppe-dataset-yolov8)
+   is a good source for the safety model — pick ~100 images covering
+   lighting and pose variety), then:
+
+   ```bash
+   docker run --privileged --rm -it \
+       -v "$PWD":/workspace -w /workspace \
+       sophgo/tpuc_dev:v3.1 \
+       bash -lc 'pip install tpu_mlir[all]==1.7 && \
+           bash scripts/build_yolov7_cvimodel.sh \
+               --onnx safety_clean.onnx \
+               --calib-dir ./calib_imgs \
+               --name safety'
+   ```
+
+   The script wraps `model_transform.py` → `run_calibration.py` →
+   `model_deploy.py` with the Seeed-recommended INT8 flags (`--quant_input
+   --customization_format RGB_PACKED --fuse_preprocess --aligned_input
+   --processor cv181x`). It produces `safety_int8.cvimodel`.
+
+3. **Flash and use.** Copy `safety_int8.cvimodel` to `/data` on the
+   reCamera, then in IEx the standard `SSCMEx.Model` API works
+   unmodified:
+
+   ```elixir
+   {:ok, engine} = SSCMEx.Engine.new()
+   :ok = SSCMEx.Engine.load(engine, "/data/safety_int8.cvimodel")
+   {:ok, model} = SSCMEx.Model.create(engine)
+   {:ok, :yolov7} = SSCMEx.Model.get_type(model)
+
+   :ok = SSCMEx.Model.set_config(model, :threshold_score, 0.45)
+   :ok = SSCMEx.Model.set_config(model, :threshold_nms,   0.45)
+   {:ok, detections} = SSCMEx.Model.run(model, image)
+   ```
+
+   Detections come back in the same `%{x, y, w, h, score, target}` shape
+   as `:yolov5`, so any downstream code that handles YOLOv5 detections
+   handles these. The class index `target` follows the order in the
+   `.pt`'s `model.names` (which may differ from `safety_map.json` —
+   verify with the metadata file produced in step 1).
+
+If you only have the ONNX (no `.pt`), `scripts/yolov7_to_clean_onnx.py`
+performs the equivalent surgery on an existing ONNX. It needs the original
+`.onnx.data` external-weights file alongside; the `.pt` route is simpler.
+
 ## Notes
 
 - `SSCMEx.Camera.retrieve_frame/2` now returns `%SSCMEx.Image{}` directly.

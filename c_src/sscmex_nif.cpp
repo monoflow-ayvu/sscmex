@@ -17,6 +17,7 @@
 #include "sscma/porting/ma_device.h"
 #include "sscma/porting/ma_camera.h"
 #include "ma_camera_sg200x.h"
+#include "sscma_yolov7.h"
 #include "app_ipcam_venc.h"
 #include <cvi_isp.h>
 #include <cvi_ae.h>
@@ -243,6 +244,12 @@ static ERL_NIF_TERM pixel_format_to_atom(ErlNifEnv* env, ma_pixel_format_t forma
 
 // Helper: model type to atom
 static ERL_NIF_TERM model_type_to_atom(ErlNifEnv* env, ma_model_type_t type) {
+    // YOLOv7 lives outside MA_MODEL_TYPE_* (kept out of the vendored enum so
+    // we don't fork the submodule). It's the same numeric value the ctor
+    // passes through to Detector — matched by uint here.
+    if (static_cast<uint16_t>(type) == sscmex::YoloV7::kModelType) {
+        return make_atom(env, "yolov7");
+    }
     switch (type) {
         case MA_MODEL_TYPE_FOMO:       return make_atom(env, "fomo");
         case MA_MODEL_TYPE_YOLOV5:     return make_atom(env, "yolov5");
@@ -1249,8 +1256,16 @@ static ERL_NIF_TERM model_create(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
         }
     }
 
-    // Create model using factory
-    Model* model = ModelFactory::create(engine_res->val, algorithm_id);
+    // YOLOv7 isn't in the vendored ModelFactory; check it first so the
+    // 3-raw-head cvimodel produced by scripts/yolov7_to_clean_onnx.py +
+    // scripts/build_yolov7_cvimodel.sh is recognised here. Falls through
+    // to the standard factory for anything else (yolov5/v8/v11/...).
+    Model* model = nullptr;
+    if (sscmex::YoloV7::isValid(engine_res->val)) {
+        model = new sscmex::YoloV7(engine_res->val);
+    } else {
+        model = ModelFactory::create(engine_res->val, algorithm_id);
+    }
     if (!model) return make_error(env, "model_create_failed");
 
     // Allocate model resource

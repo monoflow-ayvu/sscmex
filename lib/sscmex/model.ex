@@ -9,6 +9,7 @@ defmodule SSCMEx.Model do
 
   - `:fomo` - Fast Object Mobile Object detection
   - `:yolov5` - YOLOv5 object detection
+  - `:yolov7` - YOLOv7 object detection (anchor-based, decoded on-device)
   - `:yolov8` - YOLOv8 object detection
   - `:yolo11` - YOLO11 object detection
   - `:classifier` - Image classification
@@ -18,6 +19,13 @@ defmodule SSCMEx.Model do
   - `:yolo26` - YOLO26 object detection
 
   Note: With the currently pinned SSCMA-Micro commit, YOLO26 is detection-only.
+
+  YOLOv7 cvimodels must be produced from a *cleaned* ONNX whose embedded
+  post-processing has been stripped (see `scripts/yolov7_to_clean_onnx.py`
+  and `scripts/build_yolov7_cvimodel.sh`). The on-device decoder lives in
+  `c_src/sscma_yolov7.cpp` and is selected automatically when the engine's
+  outputs match the 3-raw-head layout `[1, 3, H, W, 5+nc]` at strides
+  8/16/32.
 
   ## Example
 
@@ -51,6 +59,7 @@ defmodule SSCMEx.Model do
   @type model_type ::
           :fomo
           | :yolov5
+          | :yolov7
           | :yolov8
           | :yolo11
           | :classifier
