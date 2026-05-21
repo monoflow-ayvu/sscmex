@@ -1,5 +1,6 @@
 #include "ma_camera_sg200x.h"
 
+#include <new>
 
 namespace ma {
 
@@ -11,6 +12,22 @@ struct presets_wrapper_t {
     uint16_t height;
     int fps;
 };
+
+static size_t pool_buffer_size(uint16_t width, uint16_t height, ma_pixel_format_t format) {
+    size_t pixels = static_cast<size_t>(width) * height;
+    switch (format) {
+        case MA_PIXEL_FORMAT_RGB888:
+        case MA_PIXEL_FORMAT_RGB888_PLANAR:
+            return pixels * 3;
+        case MA_PIXEL_FORMAT_RGB565:
+        case MA_PIXEL_FORMAT_YUV422:
+            return pixels * 2;
+        case MA_PIXEL_FORMAT_GRAYSCALE:
+            return pixels;
+        default:
+            return pixels;
+    }
+}
 
 static const presets_wrapper_t _presets[] = {
     {"1920x1080 @ 30fps", 1920, 1080, 30},
@@ -61,12 +78,25 @@ int CameraSG200X::vencCallback(void* pData, void* pArgs) {
         total_size += p->u32Len - p->u32Offset;
     }
 
-    ma_img_t* frame  = new ma_img_t;
-    frame->data      = new uint8_t[total_size];
+    auto& ch = m_channels[VencChn];
+    uint8_t* buf = ch.pool.acquire(total_size);
+    if (!buf) {
+        buf = new (std::nothrow) uint8_t[total_size];
+        if (!buf) return CVI_SUCCESS;
+    }
+
+    ma_img_t* frame = new (std::nothrow) ma_img_t;
+    if (!frame) {
+        if (ch.pool.owns(buf)) ch.pool.release(buf);
+        else delete[] buf;
+        return CVI_SUCCESS;
+    }
+
+    frame->data      = buf;
     frame->size      = total_size;
-    frame->width     = m_channels[VencChn].width;
-    frame->height    = m_channels[VencChn].height;
-    frame->format    = m_channels[VencChn].format;
+    frame->width     = ch.width;
+    frame->height    = ch.height;
+    frame->format    = ch.format;
     frame->timestamp = Tick::current();
     frame->count     = 1;
     frame->index     = 0;
@@ -80,7 +110,7 @@ int CameraSG200X::vencCallback(void* pData, void* pArgs) {
         memcpy(frame->data + offset, p->pu8Addr + p->u32Offset, len);
         offset += len;
 
-        if (m_channels[VencChn].format == MA_PIXEL_FORMAT_H264) {
+        if (ch.format == MA_PIXEL_FORMAT_H264) {
             switch (p->DataType.enH264EType) {
                 case H264E_NALU_ISLICE:
                 case H264E_NALU_SPS:
@@ -95,8 +125,9 @@ int CameraSG200X::vencCallback(void* pData, void* pArgs) {
         }
     }
 
-    if (!m_channels[VencChn].queue->post(frame, Tick::fromMilliseconds(1000 / m_channels[VencChn].fps))) {
-        delete[] frame->data;
+    if (!ch.queue->post(frame, Tick::fromMilliseconds(1000 / ch.fps))) {
+        if (ch.pool.owns(frame->data)) ch.pool.release(frame->data);
+        else delete[] frame->data;
         delete frame;
     }
 
@@ -109,33 +140,66 @@ int CameraSG200X::vpssCallback(void* pData, void* pArgs) {
     VIDEO_FRAME_INFO_S* VpssFrame     = (VIDEO_FRAME_INFO_S*)pData;
     VIDEO_FRAME_S* f                  = &VpssFrame->stVFrame;
 
-
     if (!m_streaming) {
         return CVI_SUCCESS;
     }
-    ma_img_t* frame  = new ma_img_t;
+
+    int ch_idx = pstVencChnCfg->VencChn;
+    auto& ch = m_channels[ch_idx];
+
+    size_t total_size = 0;
+    for (int i = 0; i < 3; i++) total_size += f->u32Length[i];
+
+    uint8_t* buf = ch.pool.acquire(total_size);
+    if (!buf) {
+        buf = new (std::nothrow) uint8_t[total_size];
+        if (!buf) return CVI_SUCCESS;
+    }
+
+    ma_img_t* frame = new (std::nothrow) ma_img_t;
+    if (!frame) {
+        if (ch.pool.owns(buf)) ch.pool.release(buf);
+        else delete[] buf;
+        return CVI_SUCCESS;
+    }
+
     frame->physical  = false;
-    frame->size      = f->u32Length[0] + f->u32Length[1] + f->u32Length[2];
-    frame->data      = new uint8_t[f->u32Length[0] + f->u32Length[1] + f->u32Length[2]];
-    frame->width     = m_channels[pstVencChnCfg->VencChn].width;
-    frame->height    = m_channels[pstVencChnCfg->VencChn].height;
-    frame->format    = m_channels[pstVencChnCfg->VencChn].format;
+    frame->size      = total_size;
+    frame->data      = buf;
+    frame->width     = ch.width;
+    frame->height    = ch.height;
+    frame->format    = ch.format;
     frame->timestamp = Tick::current();
     frame->count     = 1;
     frame->index     = 1;
 
-    uint32_t offset = 0;
-    for (int i = 0; i < 3; i++) {
-        if (f->u32Length[i]) {
-            f->pu8VirAddr[i] = (CVI_U8*)CVI_SYS_Mmap(f->u64PhyAddr[i], f->u32Length[i]);
-            memcpy(frame->data + offset, f->pu8VirAddr[i], f->u32Length[i]);
-            CVI_SYS_Munmap(f->pu8VirAddr[i], f->u32Length[i]);
-            offset += f->u32Length[i];
+    // Batch contiguous planes into a single Mmap when possible (NV12/NV21).
+    bool contiguous = f->u32Length[0] && f->u32Length[1] && !f->u32Length[2]
+                   && f->u64PhyAddr[1] == f->u64PhyAddr[0] + f->u32Length[0];
+
+    if (contiguous) {
+        CVI_U8* vir = (CVI_U8*)CVI_SYS_Mmap(f->u64PhyAddr[0], total_size);
+        if (vir) {
+            memcpy(buf, vir, total_size);
+            CVI_SYS_Munmap(vir, total_size);
+        }
+    } else {
+        uint32_t offset = 0;
+        for (int i = 0; i < 3; i++) {
+            if (f->u32Length[i]) {
+                CVI_U8* vir = (CVI_U8*)CVI_SYS_Mmap(f->u64PhyAddr[i], f->u32Length[i]);
+                if (vir) {
+                    memcpy(buf + offset, vir, f->u32Length[i]);
+                    CVI_SYS_Munmap(vir, f->u32Length[i]);
+                }
+                offset += f->u32Length[i];
+            }
         }
     }
 
-    if (!m_channels[pstVencChnCfg->VencChn].queue->post(frame, Tick::fromMilliseconds(1000 / m_channels[pstVencChnCfg->VencChn].fps))) {
-        delete[] frame->data;
+    if (!ch.queue->post(frame, Tick::fromMilliseconds(1000 / ch.fps))) {
+        if (ch.pool.owns(frame->data)) ch.pool.release(frame->data);
+        else delete[] frame->data;
         delete frame;
     }
 
@@ -238,7 +302,10 @@ void CameraSG200X::clearChannelQueue(channel& ch) noexcept {
     while (ch.queue->fetch(reinterpret_cast<void**>(&queued), 0)) {
         if (queued != nullptr) {
             if (!queued->physical) {
-                delete[] queued->data;
+                if (ch.pool.owns(queued->data))
+                    ch.pool.release(queued->data);
+                else
+                    delete[] queued->data;
             }
             delete queued;
             queued = nullptr;
@@ -313,9 +380,12 @@ ma_err_t CameraSG200X::startStream(StreamMode mode) noexcept {
             if (m_channels[i].queue != nullptr) {
                 clearChannelQueue(m_channels[i]);
             }
-            // Queue depth = fps so up to one second of jitter on the consumer
-            // side is tolerated before a frame is dropped.
-            m_channels[i].queue = new MessageBox(param.fps);
+            m_channels[i].pool.deinit();
+            m_channels[i].pool.init(
+                pool_buffer_size(m_channels[i].width, m_channels[i].height, m_channels[i].format));
+
+            m_channels[i].queue = new MessageBox(
+                queueDepthFor(m_channels[i].format));
 
             if (param.format == VIDEO_FORMAT_RGB888 || param.format == VIDEO_FORMAT_NV21) {
                 registerVideoFrameHandler(static_cast<video_ch_index_t>(i), 0, vpssCallbackStub, this);
@@ -341,6 +411,7 @@ void CameraSG200X::stopStream() noexcept {
     CAMERA_DEINIT();
     for (int i = 0; i < CHN_MAX; i++) {
         clearChannelQueue(m_channels[i]);
+        m_channels[i].pool.deinit();
     }
 }
 
@@ -479,18 +550,14 @@ ma_err_t CameraSG200X::retrieveLatestChannel(ma_img_t& frame, int channel_idx) n
         return MA_AGAIN;
     }
 
-    // Then drain everything else non-blocking, discarding stale frames.
-    // Frames in the SG200X video pipeline are heap-allocated (`new
-    // ma_img_t`); each discarded frame must release both the buffer
-    // (via `returnFrame` semantics — for non-physical buffers, delete
-    // the data) and the wrapper. For physical buffers the underlying
-    // memory is owned by VPSS/VENC and only the `ma_img_t` wrapper is
-    // ours to free.
     ma_img_t* newer = nullptr;
     while (ch.queue->fetch(reinterpret_cast<void**>(&newer), 0)) {
         if (latest != nullptr) {
             if (!latest->physical) {
-                delete[] latest->data;
+                if (ch.pool.owns(latest->data))
+                    ch.pool.release(latest->data);
+                else
+                    delete[] latest->data;
             }
             delete latest;
         }
@@ -507,9 +574,14 @@ ma_err_t CameraSG200X::retrieveLatestChannel(ma_img_t& frame, int channel_idx) n
 }
 
 void CameraSG200X::returnFrame(ma_img_t& frame) noexcept {
-    if (!frame.physical) {
-        delete[] frame.data;
+    if (frame.physical) return;
+    for (int i = 0; i < CHN_MAX; i++) {
+        if (m_channels[i].pool.owns(frame.data)) {
+            m_channels[i].pool.release(frame.data);
+            return;
+        }
     }
+    delete[] frame.data;
 }
 
 }  // namespace ma

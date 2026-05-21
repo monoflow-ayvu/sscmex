@@ -47,6 +47,10 @@ endif()
 # C++ standard
 set(CMAKE_CXX_STANDARD 17)
 
+# Use -O3 for all targets in this project (overrides Release default of -O2)
+set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
+
 # Include SG200X SDK toolchain if CMAKE_TOOLCHAIN_FILE is set
 if(DEFINED CMAKE_TOOLCHAIN_FILE)
     message(STATUS "Using CMAKE_TOOLCHAIN_FILE: ${CMAKE_TOOLCHAIN_FILE}")

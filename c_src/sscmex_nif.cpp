@@ -75,19 +75,88 @@ struct CameraRes {
 // Instantiate template for CameraRes
 template<> ErlNifResourceType* NifRes<CameraRes>::type = nullptr;
 
-// Helper to make atoms
+// Cached atoms — initialized once in on_load, valid for module lifetime.
+static struct {
+    ERL_NIF_TERM ok;
+    ERL_NIF_TERM error;
+    ERL_NIF_TERM true_;
+    ERL_NIF_TERM false_;
+    ERL_NIF_TERM x;
+    ERL_NIF_TERM y;
+    ERL_NIF_TERM z;
+    ERL_NIF_TERM w;
+    ERL_NIF_TERM h;
+    ERL_NIF_TERM score;
+    ERL_NIF_TERM target;
+    ERL_NIF_TERM box;
+    ERL_NIF_TERM points;
+    ERL_NIF_TERM mask;
+    ERL_NIF_TERM width;
+    ERL_NIF_TERM height;
+    ERL_NIF_TERM format;
+    ERL_NIF_TERM size;
+    ERL_NIF_TERM data;
+    ERL_NIF_TERM timestamp;
+    ERL_NIF_TERM key;
+    ERL_NIF_TERM name;
+    ERL_NIF_TERM shape;
+    ERL_NIF_TERM type;
+    ERL_NIF_TERM quant_param;
+    ERL_NIF_TERM scale;
+    ERL_NIF_TERM zero_point;
+    ERL_NIF_TERM is_physical;
+    ERL_NIF_TERM preprocess;
+    ERL_NIF_TERM inference;
+    ERL_NIF_TERM postprocess;
+} ATOMS;
+
+static void init_atoms(ErlNifEnv* env) {
+    ATOMS.ok           = enif_make_atom(env, "ok");
+    ATOMS.error        = enif_make_atom(env, "error");
+    ATOMS.true_        = enif_make_atom(env, "true");
+    ATOMS.false_       = enif_make_atom(env, "false");
+    ATOMS.x            = enif_make_atom(env, "x");
+    ATOMS.y            = enif_make_atom(env, "y");
+    ATOMS.z            = enif_make_atom(env, "z");
+    ATOMS.w            = enif_make_atom(env, "w");
+    ATOMS.h            = enif_make_atom(env, "h");
+    ATOMS.score        = enif_make_atom(env, "score");
+    ATOMS.target       = enif_make_atom(env, "target");
+    ATOMS.box          = enif_make_atom(env, "box");
+    ATOMS.points       = enif_make_atom(env, "points");
+    ATOMS.mask         = enif_make_atom(env, "mask");
+    ATOMS.width        = enif_make_atom(env, "width");
+    ATOMS.height       = enif_make_atom(env, "height");
+    ATOMS.format       = enif_make_atom(env, "format");
+    ATOMS.size         = enif_make_atom(env, "size");
+    ATOMS.data         = enif_make_atom(env, "data");
+    ATOMS.timestamp    = enif_make_atom(env, "timestamp");
+    ATOMS.key          = enif_make_atom(env, "key");
+    ATOMS.name         = enif_make_atom(env, "name");
+    ATOMS.shape        = enif_make_atom(env, "shape");
+    ATOMS.type         = enif_make_atom(env, "type");
+    ATOMS.quant_param  = enif_make_atom(env, "quant_param");
+    ATOMS.scale        = enif_make_atom(env, "scale");
+    ATOMS.zero_point   = enif_make_atom(env, "zero_point");
+    ATOMS.is_physical  = enif_make_atom(env, "is_physical");
+    ATOMS.preprocess   = enif_make_atom(env, "preprocess");
+    ATOMS.inference    = enif_make_atom(env, "inference");
+    ATOMS.postprocess  = enif_make_atom(env, "postprocess");
+}
+
+// Helper to make atoms (for non-cached atoms only)
 static ERL_NIF_TERM make_atom(ErlNifEnv *env, const char *name) {
     return enif_make_atom(env, name);
 }
 
 // Helper to make ok tuple
 static ERL_NIF_TERM make_ok(ErlNifEnv *env, ERL_NIF_TERM term) {
-    return enif_make_tuple2(env, make_atom(env, "ok"), term);
+    return enif_make_tuple2(env, ATOMS.ok, term);
 }
 
 // Helper to make error tuple
 static ERL_NIF_TERM make_error(ErlNifEnv *env, const char *message) {
-    return enif_make_tuple2(env, make_atom(env, "error"), enif_make_string(env, message, ERL_NIF_LATIN1));
+    return enif_make_tuple2(env, ATOMS.error, enif_make_string(env, message, ERL_NIF_LATIN1));
 }
 
 // Helper to get string from binary (Elixir "string") or char list
@@ -141,10 +210,8 @@ static ERL_NIF_TERM shape_to_list(ErlNifEnv* env, const ma_shape_t& shape) {
 // Helper: quant_param to map
 static ERL_NIF_TERM quant_param_to_map(ErlNifEnv* env, const ma_quant_param_t& qp) {
     ERL_NIF_TERM map = enif_make_new_map(env);
-    ERL_NIF_TERM scale_key = make_atom(env, "scale");
-    ERL_NIF_TERM zp_key = make_atom(env, "zero_point");
-    enif_make_map_put(env, map, scale_key, enif_make_double(env, qp.scale), &map);
-    enif_make_map_put(env, map, zp_key, enif_make_int(env, qp.zero_point), &map);
+    enif_make_map_put(env, map, ATOMS.scale, enif_make_double(env, qp.scale), &map);
+    enif_make_map_put(env, map, ATOMS.zero_point, enif_make_int(env, qp.zero_point), &map);
     return map;
 }
 
@@ -366,30 +433,30 @@ static bool get_image_struct(ErlNifEnv* env, ERL_NIF_TERM term, ma_img_t* img, E
     ERL_NIF_TERM width_term, height_term, format_term, data_term, size_term;
 
     // Get width
-    if (!enif_get_map_value(env, term, make_atom(env, "width"), &width_term)) return false;
+    if (!enif_get_map_value(env, term, ATOMS.width, &width_term)) return false;
     int width_int;
     if (!enif_get_int(env, width_term, &width_int)) return false;
     if (width_int <= 0 || width_int > static_cast<int>(std::numeric_limits<uint16_t>::max())) return false;
     img->width = (uint16_t)width_int;
 
     // Get height
-    if (!enif_get_map_value(env, term, make_atom(env, "height"), &height_term)) return false;
+    if (!enif_get_map_value(env, term, ATOMS.height, &height_term)) return false;
     int height_int;
     if (!enif_get_int(env, height_term, &height_int)) return false;
     if (height_int <= 0 || height_int > static_cast<int>(std::numeric_limits<uint16_t>::max())) return false;
     img->height = (uint16_t)height_int;
 
     // Get format
-    if (!enif_get_map_value(env, term, make_atom(env, "format"), &format_term)) return false;
+    if (!enif_get_map_value(env, term, ATOMS.format, &format_term)) return false;
     img->format = atom_to_pixel_format(env, format_term);
     if (img->format == MA_PIXEL_FORMAT_UNKNOWN) return false;
 
     // Get data binary (zero-copy - just gets pointer to existing data)
-    if (!enif_get_map_value(env, term, make_atom(env, "data"), &data_term)) return false;
+    if (!enif_get_map_value(env, term, ATOMS.data, &data_term)) return false;
     if (!enif_inspect_iolist_as_binary(env, data_term, bin)) return false;
 
     size_t declared_size = bin->size;
-    if (enif_get_map_value(env, term, make_atom(env, "size"), &size_term)) {
+    if (enif_get_map_value(env, term, ATOMS.size, &size_term)) {
         ErlNifUInt64 size_u64;
         if (!enif_get_uint64(env, size_term, &size_u64)) return false;
         if (size_u64 > static_cast<ErlNifUInt64>(std::numeric_limits<size_t>::max())) return false;
@@ -427,46 +494,46 @@ static bool get_image_struct(ErlNifEnv* env, ERL_NIF_TERM term, ma_img_t* img, E
 // Helper: bbox to map
 static ERL_NIF_TERM bbox_to_map(ErlNifEnv* env, const ma_bbox_t& bbox) {
     ERL_NIF_TERM map = enif_make_new_map(env);
-    enif_make_map_put(env, map, make_atom(env, "x"), enif_make_double(env, bbox.x), &map);
-    enif_make_map_put(env, map, make_atom(env, "y"), enif_make_double(env, bbox.y), &map);
-    enif_make_map_put(env, map, make_atom(env, "w"), enif_make_double(env, bbox.w), &map);
-    enif_make_map_put(env, map, make_atom(env, "h"), enif_make_double(env, bbox.h), &map);
-    enif_make_map_put(env, map, make_atom(env, "score"), enif_make_double(env, bbox.score), &map);
-    enif_make_map_put(env, map, make_atom(env, "target"), enif_make_int(env, bbox.target), &map);
+    enif_make_map_put(env, map, ATOMS.x, enif_make_double(env, bbox.x), &map);
+    enif_make_map_put(env, map, ATOMS.y, enif_make_double(env, bbox.y), &map);
+    enif_make_map_put(env, map, ATOMS.w, enif_make_double(env, bbox.w), &map);
+    enif_make_map_put(env, map, ATOMS.h, enif_make_double(env, bbox.h), &map);
+    enif_make_map_put(env, map, ATOMS.score, enif_make_double(env, bbox.score), &map);
+    enif_make_map_put(env, map, ATOMS.target, enif_make_int(env, bbox.target), &map);
     return map;
 }
 
 // Helper: class result to map
 static ERL_NIF_TERM class_to_map(ErlNifEnv* env, const ma_class_t& cls) {
     ERL_NIF_TERM map = enif_make_new_map(env);
-    enif_make_map_put(env, map, make_atom(env, "score"), enif_make_double(env, cls.score), &map);
-    enif_make_map_put(env, map, make_atom(env, "target"), enif_make_int(env, cls.target), &map);
+    enif_make_map_put(env, map, ATOMS.score, enif_make_double(env, cls.score), &map);
+    enif_make_map_put(env, map, ATOMS.target, enif_make_int(env, cls.target), &map);
     return map;
 }
 
 // Helper: point result to map
 static ERL_NIF_TERM point_to_map(ErlNifEnv* env, const ma_point_t& point) {
     ERL_NIF_TERM map = enif_make_new_map(env);
-    enif_make_map_put(env, map, make_atom(env, "x"), enif_make_double(env, point.x), &map);
-    enif_make_map_put(env, map, make_atom(env, "y"), enif_make_double(env, point.y), &map);
-    enif_make_map_put(env, map, make_atom(env, "score"), enif_make_double(env, point.score), &map);
-    enif_make_map_put(env, map, make_atom(env, "target"), enif_make_int(env, point.target), &map);
+    enif_make_map_put(env, map, ATOMS.x, enif_make_double(env, point.x), &map);
+    enif_make_map_put(env, map, ATOMS.y, enif_make_double(env, point.y), &map);
+    enif_make_map_put(env, map, ATOMS.score, enif_make_double(env, point.score), &map);
+    enif_make_map_put(env, map, ATOMS.target, enif_make_int(env, point.target), &map);
     return map;
 }
 
 // Helper: 3D point to map
 static ERL_NIF_TERM pt3f_to_map(ErlNifEnv* env, const ma_pt3f_t& point) {
     ERL_NIF_TERM map = enif_make_new_map(env);
-    enif_make_map_put(env, map, make_atom(env, "x"), enif_make_double(env, point.x), &map);
-    enif_make_map_put(env, map, make_atom(env, "y"), enif_make_double(env, point.y), &map);
-    enif_make_map_put(env, map, make_atom(env, "z"), enif_make_double(env, point.z), &map);
+    enif_make_map_put(env, map, ATOMS.x, enif_make_double(env, point.x), &map);
+    enif_make_map_put(env, map, ATOMS.y, enif_make_double(env, point.y), &map);
+    enif_make_map_put(env, map, ATOMS.z, enif_make_double(env, point.z), &map);
     return map;
 }
 
 // Helper: keypoint result to map
 static ERL_NIF_TERM keypoint_to_map(ErlNifEnv* env, const ma_keypoint3f_t& keypoint) {
     ERL_NIF_TERM map = enif_make_new_map(env);
-    enif_make_map_put(env, map, make_atom(env, "box"), bbox_to_map(env, keypoint.box), &map);
+    enif_make_map_put(env, map, ATOMS.box, bbox_to_map(env, keypoint.box), &map);
 
     std::vector<ERL_NIF_TERM> point_terms;
     point_terms.reserve(keypoint.pts.size());
@@ -476,7 +543,7 @@ static ERL_NIF_TERM keypoint_to_map(ErlNifEnv* env, const ma_keypoint3f_t& keypo
 
     ERL_NIF_TERM points_list =
         point_terms.empty() ? enif_make_list(env, 0) : enif_make_list_from_array(env, point_terms.data(), point_terms.size());
-    enif_make_map_put(env, map, make_atom(env, "points"), points_list, &map);
+    enif_make_map_put(env, map, ATOMS.points, points_list, &map);
     return map;
 }
 
@@ -494,13 +561,13 @@ static bool segment_to_map(ErlNifEnv* env, const ma_segm2f_t& segment, ERL_NIF_T
     }
 
     ERL_NIF_TERM mask_map = enif_make_new_map(env);
-    enif_make_map_put(env, mask_map, make_atom(env, "width"), enif_make_int(env, segment.mask.width), &mask_map);
-    enif_make_map_put(env, mask_map, make_atom(env, "height"), enif_make_int(env, segment.mask.height), &mask_map);
-    enif_make_map_put(env, mask_map, make_atom(env, "data"), enif_make_binary(env, &mask_bin), &mask_map);
+    enif_make_map_put(env, mask_map, ATOMS.width, enif_make_int(env, segment.mask.width), &mask_map);
+    enif_make_map_put(env, mask_map, ATOMS.height, enif_make_int(env, segment.mask.height), &mask_map);
+    enif_make_map_put(env, mask_map, ATOMS.data, enif_make_binary(env, &mask_bin), &mask_map);
 
     ERL_NIF_TERM map = enif_make_new_map(env);
-    enif_make_map_put(env, map, make_atom(env, "box"), bbox_to_map(env, segment.box), &map);
-    enif_make_map_put(env, map, make_atom(env, "mask"), mask_map, &map);
+    enif_make_map_put(env, map, ATOMS.box, bbox_to_map(env, segment.box), &map);
+    enif_make_map_put(env, map, ATOMS.mask, mask_map, &map);
     *out_term = map;
     return true;
 }
@@ -508,9 +575,9 @@ static bool segment_to_map(ErlNifEnv* env, const ma_segm2f_t& segment, ERL_NIF_T
 // Helper: perf to map
 static ERL_NIF_TERM perf_to_map(ErlNifEnv* env, const ma_perf_t& perf) {
     ERL_NIF_TERM map = enif_make_new_map(env);
-    enif_make_map_put(env, map, make_atom(env, "preprocess"), enif_make_int64(env, perf.preprocess), &map);
-    enif_make_map_put(env, map, make_atom(env, "inference"), enif_make_int64(env, perf.inference), &map);
-    enif_make_map_put(env, map, make_atom(env, "postprocess"), enif_make_int64(env, perf.postprocess), &map);
+    enif_make_map_put(env, map, ATOMS.preprocess, enif_make_int64(env, perf.preprocess), &map);
+    enif_make_map_put(env, map, ATOMS.inference, enif_make_int64(env, perf.inference), &map);
+    enif_make_map_put(env, map, ATOMS.postprocess, enif_make_int64(env, perf.postprocess), &map);
     return map;
 }
 
@@ -602,22 +669,20 @@ static ERL_NIF_TERM make_image_struct_ex(ErlNifEnv* env, int fmt,
     }
 
     ERL_NIF_TERM map = enif_make_new_map(env);
-    ERL_NIF_TERM struct_name;
-    ERL_NIF_TERM struct_ns;
     enif_make_map_put(env, map, make_atom(env, "__struct__"),
                       enif_make_tuple2(env,
                           make_atom(env, "Elixir.SSCMEx.Image"),
                           make_atom(env, "SSCMEx.Image")),
                       &map);
-    enif_make_map_put(env, map, make_atom(env, "width"),
+    enif_make_map_put(env, map, ATOMS.width,
                       enif_make_int(env, width), &map);
-    enif_make_map_put(env, map, make_atom(env, "height"),
+    enif_make_map_put(env, map, ATOMS.height,
                       enif_make_int(env, height), &map);
-    enif_make_map_put(env, map, make_atom(env, "format"),
+    enif_make_map_put(env, map, ATOMS.format,
                       format_int_to_atom(env, fmt), &map);
-    enif_make_map_put(env, map, make_atom(env, "data"),
+    enif_make_map_put(env, map, ATOMS.data,
                       enif_make_binary(env, &out_bin), &map);
-    enif_make_map_put(env, map, make_atom(env, "size"),
+    enif_make_map_put(env, map, ATOMS.size,
                       enif_make_uint64(env, data_size), &map);
     return map;
 }
@@ -1062,15 +1127,15 @@ static ERL_NIF_TERM engine_cvi_get_input(ErlNifEnv* env, int argc, const ERL_NIF
 
     // Build result map
     ERL_NIF_TERM map = enif_make_new_map(env);
-    enif_make_map_put(env, map, make_atom(env, "shape"), shape_to_list(env, tensor.shape), &map);
-    enif_make_map_put(env, map, make_atom(env, "type"), tensor_type_to_atom(env, tensor.type), &map);
-    enif_make_map_put(env, map, make_atom(env, "size"), enif_make_uint64(env, tensor.size), &map);
-    enif_make_map_put(env, map, make_atom(env, "quant_param"), quant_param_to_map(env, tensor.quant_param), &map);
-    enif_make_map_put(env, map, make_atom(env, "data"), enif_make_binary(env, &bin), &map);
-    enif_make_map_put(env, map, make_atom(env, "name"),
+    enif_make_map_put(env, map, ATOMS.shape, shape_to_list(env, tensor.shape), &map);
+    enif_make_map_put(env, map, ATOMS.type, tensor_type_to_atom(env, tensor.type), &map);
+    enif_make_map_put(env, map, ATOMS.size, enif_make_uint64(env, tensor.size), &map);
+    enif_make_map_put(env, map, ATOMS.quant_param, quant_param_to_map(env, tensor.quant_param), &map);
+    enif_make_map_put(env, map, ATOMS.data, enif_make_binary(env, &bin), &map);
+    enif_make_map_put(env, map, ATOMS.name,
         enif_make_string(env, tensor.name ? tensor.name : "", ERL_NIF_LATIN1), &map);
-    enif_make_map_put(env, map, make_atom(env, "is_physical"),
-        tensor.is_physical ? make_atom(env, "true") : make_atom(env, "false"), &map);
+    enif_make_map_put(env, map, ATOMS.is_physical,
+        tensor.is_physical ? ATOMS.true_ : ATOMS.false_, &map);
 
     return make_ok(env, map);
 }
@@ -1107,15 +1172,15 @@ static ERL_NIF_TERM engine_cvi_get_output(ErlNifEnv* env, int argc, const ERL_NI
 
     // Build result map
     ERL_NIF_TERM map = enif_make_new_map(env);
-    enif_make_map_put(env, map, make_atom(env, "shape"), shape_to_list(env, tensor.shape), &map);
-    enif_make_map_put(env, map, make_atom(env, "type"), tensor_type_to_atom(env, tensor.type), &map);
-    enif_make_map_put(env, map, make_atom(env, "size"), enif_make_uint64(env, tensor.size), &map);
-    enif_make_map_put(env, map, make_atom(env, "quant_param"), quant_param_to_map(env, tensor.quant_param), &map);
-    enif_make_map_put(env, map, make_atom(env, "data"), data_bin, &map);
-    enif_make_map_put(env, map, make_atom(env, "name"),
+    enif_make_map_put(env, map, ATOMS.shape, shape_to_list(env, tensor.shape), &map);
+    enif_make_map_put(env, map, ATOMS.type, tensor_type_to_atom(env, tensor.type), &map);
+    enif_make_map_put(env, map, ATOMS.size, enif_make_uint64(env, tensor.size), &map);
+    enif_make_map_put(env, map, ATOMS.quant_param, quant_param_to_map(env, tensor.quant_param), &map);
+    enif_make_map_put(env, map, ATOMS.data, data_bin, &map);
+    enif_make_map_put(env, map, ATOMS.name,
         enif_make_string(env, tensor.name ? tensor.name : "", ERL_NIF_LATIN1), &map);
-    enif_make_map_put(env, map, make_atom(env, "is_physical"),
-        tensor.is_physical ? make_atom(env, "true") : make_atom(env, "false"), &map);
+    enif_make_map_put(env, map, ATOMS.is_physical,
+        tensor.is_physical ? ATOMS.true_ : ATOMS.false_, &map);
 
     // Release our reference - binary keeps it alive via resource
     enif_release_resource(tensor_res);
@@ -1701,7 +1766,7 @@ static ERL_NIF_TERM camera_is_initialized(ErlNifEnv* env, int argc, const ERL_NI
     auto* res = NifRes<CameraRes>::get(env, argv[0]);
     if (!res || !res->val || !res->val->camera) return make_error(env, "invalid_resource");
 
-    return make_ok(env, *res->val->camera ? make_atom(env, "true") : make_atom(env, "false"));
+    return make_ok(env, *res->val->camera ? ATOMS.true_ : ATOMS.false_);
 }
 
 // Helper: stream mode to atom
@@ -1751,7 +1816,7 @@ static ERL_NIF_TERM camera_is_streaming(ErlNifEnv* env, int argc, const ERL_NIF_
     auto* res = NifRes<CameraRes>::get(env, argv[0]);
     if (!res || !res->val || !res->val->camera) return make_error(env, "invalid_resource");
 
-    return make_ok(env, res->val->camera->isStreaming() ? make_atom(env, "true") : make_atom(env, "false"));
+    return make_ok(env, res->val->camera->isStreaming() ? ATOMS.true_ : ATOMS.false_);
 }
 
 // Shared frame-retrieval helper. `mode` selects between the three
@@ -1800,13 +1865,13 @@ static ERL_NIF_TERM do_camera_retrieve(ErlNifEnv* env, const ERL_NIF_TERM argv[]
 
     // Build result map
     ERL_NIF_TERM map = enif_make_new_map(env);
-    enif_make_map_put(env, map, make_atom(env, "width"), enif_make_int(env, frame.width), &map);
-    enif_make_map_put(env, map, make_atom(env, "height"), enif_make_int(env, frame.height), &map);
-    enif_make_map_put(env, map, make_atom(env, "format"), pixel_format_to_atom(env, frame.format), &map);
-    enif_make_map_put(env, map, make_atom(env, "size"), enif_make_uint64(env, frame.size), &map);
-    enif_make_map_put(env, map, make_atom(env, "data"), enif_make_binary(env, &bin), &map);
-    enif_make_map_put(env, map, make_atom(env, "timestamp"), enif_make_int64(env, frame.timestamp), &map);
-    enif_make_map_put(env, map, make_atom(env, "key"), frame.key ? make_atom(env, "true") : make_atom(env, "false"), &map);
+    enif_make_map_put(env, map, ATOMS.width, enif_make_int(env, frame.width), &map);
+    enif_make_map_put(env, map, ATOMS.height, enif_make_int(env, frame.height), &map);
+    enif_make_map_put(env, map, ATOMS.format, pixel_format_to_atom(env, frame.format), &map);
+    enif_make_map_put(env, map, ATOMS.size, enif_make_uint64(env, frame.size), &map);
+    enif_make_map_put(env, map, ATOMS.data, enif_make_binary(env, &bin), &map);
+    enif_make_map_put(env, map, ATOMS.timestamp, enif_make_int64(env, frame.timestamp), &map);
+    enif_make_map_put(env, map, ATOMS.key, frame.key ? ATOMS.true_ : ATOMS.false_, &map);
 
     return make_ok(env, map);
 }
@@ -2376,7 +2441,7 @@ static ErlNifFunc nif_functions[] = {
     {"engine_cvi_get_output_shape", 2, engine_cvi_get_output_shape, 0},
     {"engine_cvi_get_input_quant_param", 2, engine_cvi_get_input_quant_param, 0},
     {"engine_cvi_get_output_quant_param", 2, engine_cvi_get_output_quant_param, 0},
-    {"engine_cvi_set_input", 3, engine_cvi_set_input, ERL_NIF_DIRTY_JOB_CPU_BOUND},
+    {"engine_cvi_set_input", 3, engine_cvi_set_input, 0},
     {"engine_cvi_get_input_num", 2, engine_cvi_get_input_num, 0},
     {"engine_cvi_get_output_num", 2, engine_cvi_get_output_num, 0},
 
@@ -2430,6 +2495,8 @@ static ErlNifFunc nif_functions[] = {
 
 // NIF initialization - register resource type
 static int on_load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info) {
+    init_atoms(env);
+
     ErlNifResourceFlags flags = (ErlNifResourceFlags)(
         ERL_NIF_RT_CREATE | ERL_NIF_RT_TAKEOVER);
 
