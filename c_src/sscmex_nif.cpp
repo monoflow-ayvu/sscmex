@@ -115,6 +115,42 @@ static struct {
     ERL_NIF_TERM preprocess;
     ERL_NIF_TERM inference;
     ERL_NIF_TERM postprocess;
+    // Pixel format atoms — hot path in every frame retrieval / model run
+    ERL_NIF_TERM fmt_rgb888;
+    ERL_NIF_TERM fmt_rgb565;
+    ERL_NIF_TERM fmt_yuv422;
+    ERL_NIF_TERM fmt_gray;
+    ERL_NIF_TERM fmt_jpeg;
+    ERL_NIF_TERM fmt_h264;
+    ERL_NIF_TERM fmt_h265;
+    ERL_NIF_TERM fmt_rgb888_planar;
+    ERL_NIF_TERM fmt_webp;
+    ERL_NIF_TERM fmt_unknown;
+    // Model type atoms
+    ERL_NIF_TERM mt_fomo;
+    ERL_NIF_TERM mt_yolov5;
+    ERL_NIF_TERM mt_yolov7;
+    ERL_NIF_TERM mt_yolov8;
+    ERL_NIF_TERM mt_yolo11;
+    ERL_NIF_TERM mt_classifier;
+    ERL_NIF_TERM mt_yolov8_pose;
+    ERL_NIF_TERM mt_yolo11_pose;
+    ERL_NIF_TERM mt_yolo11_seg;
+    ERL_NIF_TERM mt_yolo26;
+    ERL_NIF_TERM mt_unknown;
+    // Tensor type atoms
+    ERL_NIF_TERM tt_u8;
+    ERL_NIF_TERM tt_s8;
+    ERL_NIF_TERM tt_f32;
+    ERL_NIF_TERM tt_none;
+    // Stream mode / misc
+    ERL_NIF_TERM initialized;
+    ERL_NIF_TERM loaded;
+    ERL_NIF_TERM streaming;
+    ERL_NIF_TERM stopped;
+    ERL_NIF_TERM deinitialized;
+    ERL_NIF_TERM completed;
+    ERL_NIF_TERM struct_tag;
 } ATOMS;
 
 static void init_atoms(ErlNifEnv* env) {
@@ -149,6 +185,42 @@ static void init_atoms(ErlNifEnv* env) {
     ATOMS.preprocess   = enif_make_atom(env, "preprocess");
     ATOMS.inference    = enif_make_atom(env, "inference");
     ATOMS.postprocess  = enif_make_atom(env, "postprocess");
+    // Pixel formats
+    ATOMS.fmt_rgb888        = enif_make_atom(env, "rgb888");
+    ATOMS.fmt_rgb565        = enif_make_atom(env, "rgb565");
+    ATOMS.fmt_yuv422        = enif_make_atom(env, "yuv422");
+    ATOMS.fmt_gray          = enif_make_atom(env, "gray");
+    ATOMS.fmt_jpeg          = enif_make_atom(env, "jpeg");
+    ATOMS.fmt_h264          = enif_make_atom(env, "h264");
+    ATOMS.fmt_h265          = enif_make_atom(env, "h265");
+    ATOMS.fmt_rgb888_planar = enif_make_atom(env, "rgb888_planar");
+    ATOMS.fmt_webp          = enif_make_atom(env, "webp");
+    ATOMS.fmt_unknown       = enif_make_atom(env, "unknown");
+    // Model types
+    ATOMS.mt_fomo       = enif_make_atom(env, "fomo");
+    ATOMS.mt_yolov5     = enif_make_atom(env, "yolov5");
+    ATOMS.mt_yolov7     = enif_make_atom(env, "yolov7");
+    ATOMS.mt_yolov8     = enif_make_atom(env, "yolov8");
+    ATOMS.mt_yolo11     = enif_make_atom(env, "yolo11");
+    ATOMS.mt_classifier = enif_make_atom(env, "classifier");
+    ATOMS.mt_yolov8_pose= enif_make_atom(env, "yolov8_pose");
+    ATOMS.mt_yolo11_pose= enif_make_atom(env, "yolo11_pose");
+    ATOMS.mt_yolo11_seg = enif_make_atom(env, "yolo11_seg");
+    ATOMS.mt_yolo26     = enif_make_atom(env, "yolo26");
+    ATOMS.mt_unknown    = enif_make_atom(env, "unknown");
+    // Tensor types
+    ATOMS.tt_u8   = enif_make_atom(env, "u8");
+    ATOMS.tt_s8   = enif_make_atom(env, "s8");
+    ATOMS.tt_f32  = enif_make_atom(env, "f32");
+    ATOMS.tt_none = enif_make_atom(env, "none");
+    // Status atoms
+    ATOMS.initialized   = enif_make_atom(env, "initialized");
+    ATOMS.loaded        = enif_make_atom(env, "loaded");
+    ATOMS.streaming     = enif_make_atom(env, "streaming");
+    ATOMS.stopped       = enif_make_atom(env, "stopped");
+    ATOMS.deinitialized = enif_make_atom(env, "deinitialized");
+    ATOMS.completed     = enif_make_atom(env, "completed");
+    ATOMS.struct_tag    = enif_make_atom(env, "Elixir.SSCMEx.Image");
 }
 
 // Helper to make atoms (for non-cached atoms only)
@@ -185,11 +257,12 @@ static bool get_string_or_binary(ErlNifEnv *env, ERL_NIF_TERM term, char* buf, s
     return false;
 }
 
-// Helper: tensor type enum to atom
+// Helper: tensor type enum to atom (common types cached)
 static ERL_NIF_TERM tensor_type_to_atom(ErlNifEnv* env, ma_tensor_type_t type) {
     switch (type) {
-        case MA_TENSOR_TYPE_U8:   return make_atom(env, "u8");
-        case MA_TENSOR_TYPE_S8:   return make_atom(env, "s8");
+        case MA_TENSOR_TYPE_U8:   return ATOMS.tt_u8;
+        case MA_TENSOR_TYPE_S8:   return ATOMS.tt_s8;
+        case MA_TENSOR_TYPE_F32:  return ATOMS.tt_f32;
         case MA_TENSOR_TYPE_U16:  return make_atom(env, "u16");
         case MA_TENSOR_TYPE_S16:  return make_atom(env, "s16");
         case MA_TENSOR_TYPE_U32:  return make_atom(env, "u32");
@@ -197,9 +270,8 @@ static ERL_NIF_TERM tensor_type_to_atom(ErlNifEnv* env, ma_tensor_type_t type) {
         case MA_TENSOR_TYPE_U64:  return make_atom(env, "u64");
         case MA_TENSOR_TYPE_S64:  return make_atom(env, "s64");
         case MA_TENSOR_TYPE_F16:  return make_atom(env, "f16");
-        case MA_TENSOR_TYPE_F32:  return make_atom(env, "f32");
         case MA_TENSOR_TYPE_F64:  return make_atom(env, "f64");
-        default:                  return make_atom(env, "none");
+        default:                  return ATOMS.tt_none;
     }
 }
 
@@ -311,40 +383,37 @@ static ma_pixel_format_t atom_to_pixel_format(ErlNifEnv* env, ERL_NIF_TERM term)
     return MA_PIXEL_FORMAT_UNKNOWN;
 }
 
-// Helper: pixel format to atom
-static ERL_NIF_TERM pixel_format_to_atom(ErlNifEnv* env, ma_pixel_format_t format) {
+// Helper: pixel format to atom (cached — no string lookup)
+static ERL_NIF_TERM pixel_format_to_atom(ErlNifEnv*, ma_pixel_format_t format) {
     switch (format) {
-        case MA_PIXEL_FORMAT_RGB888: return make_atom(env, "rgb888");
-        case MA_PIXEL_FORMAT_RGB565: return make_atom(env, "rgb565");
-        case MA_PIXEL_FORMAT_YUV422: return make_atom(env, "yuv422");
-        case MA_PIXEL_FORMAT_GRAYSCALE: return make_atom(env, "gray");
-        case MA_PIXEL_FORMAT_JPEG: return make_atom(env, "jpeg");
-        case MA_PIXEL_FORMAT_H264: return make_atom(env, "h264");
-        case MA_PIXEL_FORMAT_H265: return make_atom(env, "h265");
-        case MA_PIXEL_FORMAT_RGB888_PLANAR: return make_atom(env, "rgb888_planar");
-        default:                     return make_atom(env, "unknown");
+        case MA_PIXEL_FORMAT_RGB888:        return ATOMS.fmt_rgb888;
+        case MA_PIXEL_FORMAT_RGB565:        return ATOMS.fmt_rgb565;
+        case MA_PIXEL_FORMAT_YUV422:        return ATOMS.fmt_yuv422;
+        case MA_PIXEL_FORMAT_GRAYSCALE:     return ATOMS.fmt_gray;
+        case MA_PIXEL_FORMAT_JPEG:          return ATOMS.fmt_jpeg;
+        case MA_PIXEL_FORMAT_H264:          return ATOMS.fmt_h264;
+        case MA_PIXEL_FORMAT_H265:          return ATOMS.fmt_h265;
+        case MA_PIXEL_FORMAT_RGB888_PLANAR: return ATOMS.fmt_rgb888_planar;
+        default:                            return ATOMS.fmt_unknown;
     }
 }
 
-// Helper: model type to atom
-static ERL_NIF_TERM model_type_to_atom(ErlNifEnv* env, ma_model_type_t type) {
-    // YOLOv7 lives outside MA_MODEL_TYPE_* (kept out of the vendored enum so
-    // we don't fork the submodule). It's the same numeric value the ctor
-    // passes through to Detector — matched by uint here.
+// Helper: model type to atom (cached — no string lookup)
+static ERL_NIF_TERM model_type_to_atom(ErlNifEnv*, ma_model_type_t type) {
     if (static_cast<uint16_t>(type) == sscmex::YoloV7::kModelType) {
-        return make_atom(env, "yolov7");
+        return ATOMS.mt_yolov7;
     }
     switch (type) {
-        case MA_MODEL_TYPE_FOMO:       return make_atom(env, "fomo");
-        case MA_MODEL_TYPE_YOLOV5:     return make_atom(env, "yolov5");
-        case MA_MODEL_TYPE_YOLOV8:     return make_atom(env, "yolov8");
-        case MA_MODEL_TYPE_YOLO11:     return make_atom(env, "yolo11");
-        case MA_MODEL_TYPE_IMCLS:      return make_atom(env, "classifier");
-        case MA_MODEL_TYPE_YOLOV8_POSE: return make_atom(env, "yolov8_pose");
-        case MA_MODEL_TYPE_YOLO11_POSE: return make_atom(env, "yolo11_pose");
-        case MA_MODEL_TYPE_YOLO11_SEG: return make_atom(env, "yolo11_seg");
-        case MA_MODEL_TYPE_YOLO26:     return make_atom(env, "yolo26");
-        default:                       return make_atom(env, "unknown");
+        case MA_MODEL_TYPE_FOMO:        return ATOMS.mt_fomo;
+        case MA_MODEL_TYPE_YOLOV5:      return ATOMS.mt_yolov5;
+        case MA_MODEL_TYPE_YOLOV8:      return ATOMS.mt_yolov8;
+        case MA_MODEL_TYPE_YOLO11:      return ATOMS.mt_yolo11;
+        case MA_MODEL_TYPE_IMCLS:       return ATOMS.mt_classifier;
+        case MA_MODEL_TYPE_YOLOV8_POSE: return ATOMS.mt_yolov8_pose;
+        case MA_MODEL_TYPE_YOLO11_POSE: return ATOMS.mt_yolo11_pose;
+        case MA_MODEL_TYPE_YOLO11_SEG:  return ATOMS.mt_yolo11_seg;
+        case MA_MODEL_TYPE_YOLO26:      return ATOMS.mt_yolo26;
+        default:                        return ATOMS.mt_unknown;
     }
 }
 
@@ -660,16 +729,16 @@ static int parse_format_atom_cstr(const char* atom) {
     return -1;
 }
 
-// Helper: format integer (ma_pixel_format_t or SSCMEX_FORMAT_WEBP) to atom
-static ERL_NIF_TERM format_int_to_atom(ErlNifEnv* env, int fmt) {
+// Helper: format integer (ma_pixel_format_t or SSCMEX_FORMAT_WEBP) to atom (cached)
+static ERL_NIF_TERM format_int_to_atom(ErlNifEnv*, int fmt) {
     switch (fmt) {
-        case MA_PIXEL_FORMAT_RGB888:    return make_atom(env, "rgb888");
-        case MA_PIXEL_FORMAT_RGB565:    return make_atom(env, "rgb565");
-        case MA_PIXEL_FORMAT_YUV422:    return make_atom(env, "yuv422");
-        case MA_PIXEL_FORMAT_GRAYSCALE: return make_atom(env, "gray");
-        case MA_PIXEL_FORMAT_JPEG:      return make_atom(env, "jpeg");
-        case SSCMEX_FORMAT_WEBP:        return make_atom(env, "webp");
-        default:                        return make_atom(env, "unknown");
+        case MA_PIXEL_FORMAT_RGB888:    return ATOMS.fmt_rgb888;
+        case MA_PIXEL_FORMAT_RGB565:    return ATOMS.fmt_rgb565;
+        case MA_PIXEL_FORMAT_YUV422:    return ATOMS.fmt_yuv422;
+        case MA_PIXEL_FORMAT_GRAYSCALE: return ATOMS.fmt_gray;
+        case MA_PIXEL_FORMAT_JPEG:      return ATOMS.fmt_jpeg;
+        case SSCMEX_FORMAT_WEBP:        return ATOMS.fmt_webp;
+        default:                        return ATOMS.fmt_unknown;
     }
 }
 
@@ -687,10 +756,7 @@ static ERL_NIF_TERM make_image_struct_ex(ErlNifEnv* env, int fmt,
 
     ERL_NIF_TERM map = enif_make_new_map(env);
     enif_make_map_put(env, map, make_atom(env, "__struct__"),
-                      enif_make_tuple2(env,
-                          make_atom(env, "Elixir.SSCMEx.Image"),
-                          make_atom(env, "SSCMEx.Image")),
-                      &map);
+                      ATOMS.struct_tag, &map);
     enif_make_map_put(env, map, ATOMS.width,
                       enif_make_int(env, width), &map);
     enif_make_map_put(env, map, ATOMS.height,
@@ -1100,7 +1166,7 @@ static ERL_NIF_TERM engine_cvi_init(ErlNifEnv *env, int argc, const ERL_NIF_TERM
     if (!res || !res->val) return make_error(env, "invalid_resource");
 
     ma_err_t err = res->val->init();
-    return err == MA_OK ? make_ok(env, make_atom(env, "initialized"))
+    return err == MA_OK ? make_ok(env, ATOMS.initialized)
                         : make_error(env, "init_failed");
 }
 
@@ -1116,7 +1182,7 @@ static ERL_NIF_TERM engine_cvi_load(ErlNifEnv *env, int argc, const ERL_NIF_TERM
     }
 
     ma_err_t err = res->val->load(path);
-    return err == MA_OK ? make_ok(env, make_atom(env, "loaded"))
+    return err == MA_OK ? make_ok(env, ATOMS.loaded)
                         : make_error(env, "load_failed");
 }
 
@@ -1283,7 +1349,7 @@ static ERL_NIF_TERM engine_cvi_set_input(ErlNifEnv* env, int argc, const ERL_NIF
     }
     memcpy(tensor.data.u8, bin.data, bin.size);
 
-    return make_ok(env, make_atom(env, "ok"));
+    return make_ok(env, ATOMS.ok);
 }
 
 // NIF: Get input tensor index by name
@@ -1320,7 +1386,7 @@ static ERL_NIF_TERM engine_cvi_run(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
     if (!res || !res->val) return make_error(env, "invalid_resource");
 
     ma_err_t err = res->val->run();
-    return err == MA_OK ? make_ok(env, make_atom(env, "completed"))
+    return err == MA_OK ? make_ok(env, ATOMS.completed)
                         : make_error(env, "run_failed");
 }
 
@@ -1546,7 +1612,7 @@ static ERL_NIF_TERM model_set_config(ErlNifEnv* env, int argc, const ERL_NIF_TER
     }
 
     ma_err_t err = res->val->model->setConfig(cfg_opt, value);
-    return err == MA_OK ? make_ok(env, make_atom(env, "ok"))
+    return err == MA_OK ? make_ok(env, ATOMS.ok)
                         : make_error(env, "config_failed");
 }
 
@@ -1747,7 +1813,7 @@ static ERL_NIF_TERM camera_init(ErlNifEnv* env, int argc, const ERL_NIF_TERM arg
     if (!enif_get_int(env, argv[1], &preset_idx)) return make_error(env, "invalid_preset");
 
     ma_err_t err = res->val->camera->init((size_t)preset_idx);
-    return err == MA_OK ? make_ok(env, make_atom(env, "initialized"))
+    return err == MA_OK ? make_ok(env, ATOMS.initialized)
                         : make_error(env, "init_failed");
 }
 
@@ -1757,7 +1823,7 @@ static ERL_NIF_TERM camera_deinit(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
     if (!res || !res->val || !res->val->camera) return make_error(env, "invalid_resource");
 
     res->val->camera->deInit();
-    return make_ok(env, make_atom(env, "deinitialized"));
+    return make_ok(env, ATOMS.deinitialized);
 }
 
 // NIF: Get available presets
@@ -1824,7 +1890,7 @@ static ERL_NIF_TERM camera_start_stream(ErlNifEnv* env, int argc, const ERL_NIF_
     if (mode == Camera::StreamMode::kUnknown) return make_error(env, "invalid_mode");
 
     ma_err_t err = res->val->camera->startStream(mode);
-    return err == MA_OK ? make_ok(env, make_atom(env, "streaming"))
+    return err == MA_OK ? make_ok(env, ATOMS.streaming)
                         : make_error(env, "start_stream_failed");
 }
 
@@ -1834,7 +1900,7 @@ static ERL_NIF_TERM camera_stop_stream(ErlNifEnv* env, int argc, const ERL_NIF_T
     if (!res || !res->val || !res->val->camera) return make_error(env, "invalid_resource");
 
     res->val->camera->stopStream();
-    return make_ok(env, make_atom(env, "stopped"));
+    return make_ok(env, ATOMS.stopped);
 }
 
 // NIF: Check if camera is streaming
@@ -1866,7 +1932,6 @@ static ERL_NIF_TERM do_camera_retrieve(ErlNifEnv* env, const ERL_NIF_TERM argv[]
         return make_error(env, "channel_out_of_range");
 
     ma_img_t frame;
-    // CameraRes always holds a CameraSG200X on this hardware.
     auto* sg200x = static_cast<ma::CameraSG200X*>(res->val->camera);
     ma_err_t err = MA_OK;
     switch (mode) {
@@ -1878,24 +1943,22 @@ static ERL_NIF_TERM do_camera_retrieve(ErlNifEnv* env, const ERL_NIF_TERM argv[]
         return make_error(env, err == MA_AGAIN ? "queue_empty" : "retrieve_frame_failed");
     }
 
-    // Allocate a resource to own the frame buffer for zero-copy transfer
-    auto* frame_res = NifRes<FrameDataRes>::allocate(env);
-    if (!frame_res) {
-        res->val->camera->returnFrame(frame);
+    // Copy frame data into an ERL binary and return the buffer to the pool
+    // immediately. This avoids the previous detach-and-replace pattern which
+    // allocated a fresh 6MB buffer (new uint8_t[]) on every retrieval.
+    ErlNifBinary out_bin;
+    if (!enif_alloc_binary(frame.size, &out_bin)) {
+        sg200x->returnFrame(frame);
         return make_error(env, "allocation_failed");
     }
-    frame_res->val = new FrameDataRes();
-    frame_res->val->data = frame.data;
+    memcpy(out_bin.data, frame.data, frame.size);
 
-    // Detach buffer from pool (allocates a replacement); for heap-fallback
-    // frames this is a no-op — the resource destructor will delete[] either way.
-    sg200x->detachFrameBuffer(frame.data);
+    // Return buffer to pool (no-op for heap-fallback frames; for pool frames
+    // the slot becomes available immediately for the next camera callback).
+    sg200x->returnFrame(frame);
 
-    // Zero-copy binary backed by the resource
-    ERL_NIF_TERM data_bin = enif_make_resource_binary(env, frame_res, frame.data, frame.size);
-    enif_release_resource(frame_res);
+    ERL_NIF_TERM data_bin = enif_make_binary(env, &out_bin);
 
-    // Build result map
     ERL_NIF_TERM map = enif_make_new_map(env);
     enif_make_map_put(env, map, ATOMS.width, enif_make_int(env, frame.width), &map);
     enif_make_map_put(env, map, ATOMS.height, enif_make_int(env, frame.height), &map);
@@ -1976,7 +2039,7 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         }
         jpeg_param.u32Qfactor = static_cast<CVI_U32>(quality);
         ret = CVI_VENC_SetJpegParam(jpeg_ch, &jpeg_param);
-        return ret == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok"))
+        return ret == CVI_SUCCESS ? make_ok(env, ATOMS.ok)
                                   : make_error(env, "set_quality_failed");
     }
 
@@ -1990,7 +2053,7 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         if (strcmp(mode_atom, "auto") == 0) attr.enOpType = OP_TYPE_AUTO;
         else if (strcmp(mode_atom, "manual") == 0) attr.enOpType = OP_TYPE_MANUAL;
         else return make_error(env, "invalid_mode");
-        return CVI_ISP_SetExposureAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_ae_mode_failed");
+        return CVI_ISP_SetExposureAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, ATOMS.ok) : make_error(env, "set_ae_mode_failed");
     }
 
     if (strcmp(ctrl_atom, "max_iso") == 0) {
@@ -2001,7 +2064,7 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         if (CVI_ISP_GetExposureAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "ae_unavailable");
         attr.stAuto.enGainType = AE_TYPE_ISO;
         attr.stAuto.stISONumRange.u32Max = static_cast<CVI_U32>(val);
-        return CVI_ISP_SetExposureAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_max_iso_failed");
+        return CVI_ISP_SetExposureAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, ATOMS.ok) : make_error(env, "set_max_iso_failed");
     }
 
     if (strcmp(ctrl_atom, "exposure_us") == 0) {
@@ -2013,7 +2076,7 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         attr.enOpType = OP_TYPE_MANUAL;
         attr.stManual.enExpTimeOpType = OP_TYPE_MANUAL;
         attr.stManual.u32ExpTime = static_cast<CVI_U32>(val);
-        return CVI_ISP_SetExposureAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_exposure_failed");
+        return CVI_ISP_SetExposureAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, ATOMS.ok) : make_error(env, "set_exposure_failed");
     }
 
     if (strcmp(ctrl_atom, "gain") == 0) {
@@ -2027,7 +2090,7 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         attr.stManual.u32AGain = static_cast<CVI_U32>(val);
         attr.stManual.u32DGain = 1024;
         attr.stManual.u32ISPDGain = 1024;
-        return CVI_ISP_SetExposureAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_gain_failed");
+        return CVI_ISP_SetExposureAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, ATOMS.ok) : make_error(env, "set_gain_failed");
     }
 
     if (strcmp(ctrl_atom, "exposure_range") == 0) {
@@ -2045,7 +2108,7 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         attr.enOpType = OP_TYPE_AUTO;
         attr.stAuto.stExpTimeRange.u32Min = static_cast<CVI_U32>(min_us);
         attr.stAuto.stExpTimeRange.u32Max = static_cast<CVI_U32>(max_us);
-        return CVI_ISP_SetExposureAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_exposure_range_failed");
+        return CVI_ISP_SetExposureAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, ATOMS.ok) : make_error(env, "set_exposure_range_failed");
     }
 
     if (strcmp(ctrl_atom, "max_exposure_us") == 0) {
@@ -2057,7 +2120,7 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         if (static_cast<CVI_U32>(val) < attr.stAuto.stExpTimeRange.u32Min)
             return make_error(env, "exposure_out_of_range");
         attr.stAuto.stExpTimeRange.u32Max = static_cast<CVI_U32>(val);
-        return CVI_ISP_SetExposureAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_max_exposure_failed");
+        return CVI_ISP_SetExposureAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, ATOMS.ok) : make_error(env, "set_max_exposure_failed");
     }
 
     // --- TNR Controls ---
@@ -2070,7 +2133,7 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         if (strcmp(bool_atom, "true") == 0) attr.Enable = CVI_TRUE;
         else if (strcmp(bool_atom, "false") == 0) attr.Enable = CVI_FALSE;
         else return make_error(env, "invalid_boolean");
-        return CVI_ISP_SetTNRAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_tnr_failed");
+        return CVI_ISP_SetTNRAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, ATOMS.ok) : make_error(env, "set_tnr_failed");
     }
 
     if (strcmp(ctrl_atom, "tnr_strength") == 0) {
@@ -2081,7 +2144,7 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         if (CVI_ISP_GetTNRAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "tnr_unavailable");
         attr.enOpType = OP_TYPE_MANUAL;
         attr.stManual.TnrStrength0 = static_cast<CVI_U8>(val);
-        return CVI_ISP_SetTNRAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_tnr_strength_failed");
+        return CVI_ISP_SetTNRAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, ATOMS.ok) : make_error(env, "set_tnr_strength_failed");
     }
 
     // --- Image Tuning Controls ---
@@ -2094,7 +2157,7 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         if (CVI_ISP_GetYContrastAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
         attr.enOpType = OP_TYPE_MANUAL;
         attr.stManual.CenterLuma = static_cast<CVI_U8>(val);
-        return CVI_ISP_SetYContrastAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_brightness_failed");
+        return CVI_ISP_SetYContrastAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, ATOMS.ok) : make_error(env, "set_brightness_failed");
     }
 
     // Contrast: via ISP YContrast module (ContrastHigh in stManual)
@@ -2106,7 +2169,7 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         if (CVI_ISP_GetYContrastAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
         attr.enOpType = OP_TYPE_MANUAL;
         attr.stManual.ContrastHigh = static_cast<CVI_U8>(val);
-        return CVI_ISP_SetYContrastAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_contrast_failed");
+        return CVI_ISP_SetYContrastAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, ATOMS.ok) : make_error(env, "set_contrast_failed");
     }
 
     // Saturation: via ISP Saturation module (stManual.Saturation)
@@ -2118,7 +2181,7 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         if (CVI_ISP_GetSaturationAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
         attr.enOpType = OP_TYPE_MANUAL;
         attr.stManual.Saturation = static_cast<CVI_U8>(val);
-        return CVI_ISP_SetSaturationAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_saturation_failed");
+        return CVI_ISP_SetSaturationAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, ATOMS.ok) : make_error(env, "set_saturation_failed");
     }
 
     // Sharpness: via ISP Sharpen module (stManual.GlobalGain)
@@ -2130,7 +2193,7 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         if (CVI_ISP_GetSharpenAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
         attr.enOpType = OP_TYPE_MANUAL;
         attr.stManual.GlobalGain = static_cast<CVI_U8>(val);
-        return CVI_ISP_SetSharpenAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_sharpness_failed");
+        return CVI_ISP_SetSharpenAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, ATOMS.ok) : make_error(env, "set_sharpness_failed");
     }
 
     // Raw (Bayer) NR strength: via ISP NR module (stManual.NoiseSuppressStr)
@@ -2142,7 +2205,7 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         if (CVI_ISP_GetNRAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
         attr.enOpType = OP_TYPE_MANUAL;
         attr.stManual.NoiseSuppressStr = static_cast<CVI_U8>(val);
-        return CVI_ISP_SetNRAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_nr_strength_failed");
+        return CVI_ISP_SetNRAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, ATOMS.ok) : make_error(env, "set_nr_strength_failed");
     }
 
     // Luma NR strength: via ISP YNR module (stManual.NoiseSuppressStr)
@@ -2154,7 +2217,7 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         if (CVI_ISP_GetYNRAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
         attr.enOpType = OP_TYPE_MANUAL;
         attr.stManual.NoiseSuppressStr = static_cast<CVI_U8>(val);
-        return CVI_ISP_SetYNRAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_ynr_strength_failed");
+        return CVI_ISP_SetYNRAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, ATOMS.ok) : make_error(env, "set_ynr_strength_failed");
     }
 
     // Chroma NR strength: via ISP CNR module (stManual.NoiseSuppressStr)
@@ -2166,7 +2229,7 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         if (CVI_ISP_GetCNRAttr(0, &attr) != CVI_SUCCESS) return make_error(env, "isp_unavailable");
         attr.enOpType = OP_TYPE_MANUAL;
         attr.stManual.NoiseSuppressStr = static_cast<CVI_U8>(val);
-        return CVI_ISP_SetCNRAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, make_atom(env, "ok")) : make_error(env, "set_cnr_strength_failed");
+        return CVI_ISP_SetCNRAttr(0, &attr) == CVI_SUCCESS ? make_ok(env, ATOMS.ok) : make_error(env, "set_cnr_strength_failed");
     }
 
     // --- VENC encoder parameters (H.264 / H.265 only, applied at startStream time) ---
@@ -2217,7 +2280,7 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
 
         auto* sg200x = static_cast<ma::CameraSG200X*>(res->val->camera);
         sg200x->setChannelVencParams(ch, vp);
-        return make_ok(env, make_atom(env, "ok"));
+        return make_ok(env, ATOMS.ok);
     }
 
     Camera::CtrlType ctrl;
@@ -2261,7 +2324,7 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
     }
 
     ma_err_t err = res->val->camera->commandCtrl(ctrl, Camera::CtrlMode::kWrite, value);
-    return err == MA_OK ? make_ok(env, make_atom(env, "ok"))
+    return err == MA_OK ? make_ok(env, ATOMS.ok)
                         : make_error(env, "set_ctrl_failed");
 }
 
@@ -2275,7 +2338,7 @@ static ERL_NIF_TERM camera_request_keyframe(ErlNifEnv* env, int argc, const ERL_
     if (ch < 0 || ch > 2) return make_error(env, "channel_out_of_range");
 
     int ret = requestKeyframe(static_cast<video_ch_index_t>(ch));
-    return ret == 0 ? make_ok(env, make_atom(env, "ok")) : make_error(env, "request_keyframe_failed");
+    return ret == 0 ? make_ok(env, ATOMS.ok) : make_error(env, "request_keyframe_failed");
 }
 
 // NIF: Get camera control

@@ -38,24 +38,27 @@ static const presets_wrapper_t _presets[] = {
     {"1280x720 @ 5fps", 1280, 720, 5},
 };
 
+// Keep the critical section around the actual hardware calls only.
+// The stabilization sleeps run outside so they don't block the BEAM
+// scheduler or other callbacks for >1s.
 #define CAMERA_INIT()                               \
     {                                               \
-        Thread::enterCritical();                    \
         Thread::sleep(Tick::fromMilliseconds(100)); \
+        Thread::enterCritical();                    \
         MA_LOGD(TAG, "start video");                \
         startVideo();                               \
-        Thread::sleep(Tick::fromSeconds(1));        \
         Thread::exitCritical();                     \
+        Thread::sleep(Tick::fromMilliseconds(500)); \
     }
 
 #define CAMERA_DEINIT()                             \
     {                                               \
+        Thread::sleep(Tick::fromMilliseconds(100)); \
         Thread::enterCritical();                    \
         MA_LOGD(TAG, "deinit video");               \
-        Thread::sleep(Tick::fromMilliseconds(100)); \
         deinitVideo();                              \
-        Thread::sleep(Tick::fromSeconds(1));        \
         Thread::exitCritical();                     \
+        Thread::sleep(Tick::fromMilliseconds(500)); \
     }
 
 

@@ -92,6 +92,13 @@ set(SOURCE_FILES
     "${C_SRC}/ma_camera_sg200x.cpp"
 )
 
+# YOLOv7 postprocessor is floating-point heavy; -ffast-math lets the
+# compiler reorder/fuse ops (FMA, reciprocal approx). Safe because
+# detection scores don't require IEEE precision.
+set_source_files_properties("${C_SRC}/sscma_yolov7.cpp" PROPERTIES
+    COMPILE_FLAGS "-ffast-math"
+)
+
 # Sophgo video subsystem sources (glob all .c files)
 file(GLOB_RECURSE SOPHGO_VIDEO_SOURCES
     "${C_SRC}/sophgo/video/*.c"
