@@ -584,4 +584,12 @@ void CameraSG200X::returnFrame(ma_img_t& frame) noexcept {
     delete[] frame.data;
 }
 
+void CameraSG200X::detachFrameBuffer(uint8_t* data) noexcept {
+    if (!data) return;
+    for (int i = 0; i < CHN_MAX; i++) {
+        if (m_channels[i].pool.detach_and_replace(data))
+            return;
+    }
+}
+
 }  // namespace ma

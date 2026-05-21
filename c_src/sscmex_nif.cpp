@@ -75,6 +75,13 @@ struct CameraRes {
 // Instantiate template for CameraRes
 template<> ErlNifResourceType* NifRes<CameraRes>::type = nullptr;
 
+// Frame data resource - owns a detached frame buffer for zero-copy binary transfer
+struct FrameDataRes {
+    uint8_t* data;
+};
+
+template<> ErlNifResourceType* NifRes<FrameDataRes>::type = nullptr;
+
 // Cached atoms — initialized once in on_load, valid for module lifetime.
 static struct {
     ERL_NIF_TERM ok;
@@ -272,6 +279,16 @@ static void camera_dtor(ErlNifEnv* env, void* obj) {
     if (res->val) {
         // Camera is managed externally (registered with Device)
         res->val->camera = nullptr;
+        delete res->val;
+        res->val = nullptr;
+    }
+}
+
+// Frame data resource destructor - frees the detached frame buffer
+static void frame_data_dtor(ErlNifEnv* env, void* obj) {
+    auto* res = static_cast<NifRes<FrameDataRes>*>(obj);
+    if (res->val) {
+        delete[] res->val->data;
         delete res->val;
         res->val = nullptr;
     }
@@ -717,9 +734,9 @@ static ERL_NIF_TERM image_convert(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
 
     ma_pixel_format_t src_fmt = img.format;
 
-    // Same format -> return copy
+    // Same format -> return input unchanged (no copy)
     if (src_fmt == static_cast<ma_pixel_format_t>(dst_fmt)) {
-        return make_ok(env, make_image_struct_ex(env, dst_fmt, img.width, img.height, img.data, img.size));
+        return make_ok(env, argv[0]);
     }
 
     // --- Compressed output (JPEG, WebP) ---
@@ -735,14 +752,17 @@ static ERL_NIF_TERM image_convert(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
             ::cv::Mat yuv_mat(img.height, img.width, CV_8UC2, img.data);
             ::cv::cvtColor(yuv_mat, src_mat, ::cv::COLOR_YUV2RGB_YUYV);
         } else if (src_fmt == MA_PIXEL_FORMAT_RGB565) {
-            // RGB565 -> RGB888 via custom loop
+            // RGB565 -> RGB888 via bit-replication (vectorizer-friendly)
             src_mat = ::cv::Mat(img.height, img.width, CV_8UC3);
             const uint16_t* src16 = reinterpret_cast<const uint16_t*>(img.data);
             for (int i = 0; i < img.height * img.width; i++) {
                 uint16_t pixel = src16[i];
-                src_mat.data[i * 3 + 0] = ((pixel >> 11) & 0x1F) * 255 / 31;
-                src_mat.data[i * 3 + 1] = ((pixel >> 5) & 0x3F) * 255 / 63;
-                src_mat.data[i * 3 + 2] = (pixel & 0x1F) * 255 / 31;
+                uint8_t r5 = (pixel >> 11) & 0x1F;
+                uint8_t g6 = (pixel >> 5) & 0x3F;
+                uint8_t b5 = pixel & 0x1F;
+                src_mat.data[i * 3 + 0] = (r5 << 3) | (r5 >> 2);
+                src_mat.data[i * 3 + 1] = (g6 << 2) | (g6 >> 4);
+                src_mat.data[i * 3 + 2] = (b5 << 3) | (b5 >> 2);
             }
         } else if (src_fmt == MA_PIXEL_FORMAT_JPEG) {
             // JPEG input - decode first, then re-encode to target format
@@ -894,15 +914,18 @@ static ERL_NIF_TERM image_convert(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
         }
     }
 
-    // RGB565 -> RGB888 (custom loop)
+    // RGB565 -> RGB888 (bit-replication, vectorizer-friendly)
     if (src_fmt == MA_PIXEL_FORMAT_RGB565 && dst_fmt == MA_PIXEL_FORMAT_RGB888) {
         ::cv::Mat dst_mat(img.height, img.width, CV_8UC3);
         const uint16_t* src16 = reinterpret_cast<const uint16_t*>(img.data);
         for (int i = 0; i < img.height * img.width; i++) {
             uint16_t pixel = src16[i];
-            dst_mat.data[i * 3 + 0] = ((pixel >> 11) & 0x1F) * 255 / 31;
-            dst_mat.data[i * 3 + 1] = ((pixel >> 5) & 0x3F) * 255 / 63;
-            dst_mat.data[i * 3 + 2] = (pixel & 0x1F) * 255 / 31;
+            uint8_t r5 = (pixel >> 11) & 0x1F;
+            uint8_t g6 = (pixel >> 5) & 0x3F;
+            uint8_t b5 = pixel & 0x1F;
+            dst_mat.data[i * 3 + 0] = (r5 << 3) | (r5 >> 2);
+            dst_mat.data[i * 3 + 1] = (g6 << 2) | (g6 >> 4);
+            dst_mat.data[i * 3 + 2] = (b5 << 3) | (b5 >> 2);
         }
         return make_ok(env, make_image_struct_ex(env, dst_fmt, img.width, img.height,
                                                   dst_mat.data, dst_mat.total() * dst_mat.elemSize()));
@@ -949,9 +972,12 @@ static ERL_NIF_TERM image_convert(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
         const uint16_t* src16 = reinterpret_cast<const uint16_t*>(img.data);
         for (int i = 0; i < img.height * img.width; i++) {
             uint16_t pixel = src16[i];
-            rgb_mat.data[i * 3 + 0] = ((pixel >> 11) & 0x1F) * 255 / 31;
-            rgb_mat.data[i * 3 + 1] = ((pixel >> 5) & 0x3F) * 255 / 63;
-            rgb_mat.data[i * 3 + 2] = (pixel & 0x1F) * 255 / 31;
+            uint8_t r5 = (pixel >> 11) & 0x1F;
+            uint8_t g6 = (pixel >> 5) & 0x3F;
+            uint8_t b5 = pixel & 0x1F;
+            rgb_mat.data[i * 3 + 0] = (r5 << 3) | (r5 >> 2);
+            rgb_mat.data[i * 3 + 1] = (g6 << 2) | (g6 >> 4);
+            rgb_mat.data[i * 3 + 2] = (b5 << 3) | (b5 >> 2);
         }
         ::cv::Mat gray_mat;
         ::cv::cvtColor(rgb_mat, gray_mat, ::cv::COLOR_RGB2GRAY);
@@ -1852,16 +1878,22 @@ static ERL_NIF_TERM do_camera_retrieve(ErlNifEnv* env, const ERL_NIF_TERM argv[]
         return make_error(env, err == MA_AGAIN ? "queue_empty" : "retrieve_frame_failed");
     }
 
-    // Create binary from frame data (copy - frame ownership is with camera)
-    ErlNifBinary bin;
-    if (!enif_alloc_binary(frame.size, &bin)) {
+    // Allocate a resource to own the frame buffer for zero-copy transfer
+    auto* frame_res = NifRes<FrameDataRes>::allocate(env);
+    if (!frame_res) {
         res->val->camera->returnFrame(frame);
-        return make_error(env, "binary_allocation_failed");
+        return make_error(env, "allocation_failed");
     }
-    memcpy(bin.data, frame.data, frame.size);
+    frame_res->val = new FrameDataRes();
+    frame_res->val->data = frame.data;
 
-    // Return frame to camera
-    res->val->camera->returnFrame(frame);
+    // Detach buffer from pool (allocates a replacement); for heap-fallback
+    // frames this is a no-op — the resource destructor will delete[] either way.
+    sg200x->detachFrameBuffer(frame.data);
+
+    // Zero-copy binary backed by the resource
+    ERL_NIF_TERM data_bin = enif_make_resource_binary(env, frame_res, frame.data, frame.size);
+    enif_release_resource(frame_res);
 
     // Build result map
     ERL_NIF_TERM map = enif_make_new_map(env);
@@ -1869,7 +1901,7 @@ static ERL_NIF_TERM do_camera_retrieve(ErlNifEnv* env, const ERL_NIF_TERM argv[]
     enif_make_map_put(env, map, ATOMS.height, enif_make_int(env, frame.height), &map);
     enif_make_map_put(env, map, ATOMS.format, pixel_format_to_atom(env, frame.format), &map);
     enif_make_map_put(env, map, ATOMS.size, enif_make_uint64(env, frame.size), &map);
-    enif_make_map_put(env, map, ATOMS.data, enif_make_binary(env, &bin), &map);
+    enif_make_map_put(env, map, ATOMS.data, data_bin, &map);
     enif_make_map_put(env, map, ATOMS.timestamp, enif_make_int64(env, frame.timestamp), &map);
     enif_make_map_put(env, map, ATOMS.key, frame.key ? ATOMS.true_ : ATOMS.false_, &map);
 
@@ -2533,7 +2565,14 @@ static int on_load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info) {
         env, "Elixir.SSCMEx.Nif", "camera",
         camera_dtor, flags, NULL);
 
-    return NifRes<CameraRes>::type ? 0 : -1;
+    if (!NifRes<CameraRes>::type) return -1;
+
+    // Register frame data resource type for zero-copy frame binaries
+    NifRes<FrameDataRes>::type = enif_open_resource_type(
+        env, "Elixir.SSCMEx.Nif", "frame_data",
+        frame_data_dtor, flags, NULL);
+
+    return NifRes<FrameDataRes>::type ? 0 : -1;
 }
 
 // NIF reload

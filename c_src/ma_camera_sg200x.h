@@ -17,7 +17,7 @@ namespace ma {
 
 class FrameBufferPool {
 public:
-    static constexpr int kCapacity = 4;
+    static constexpr int kCapacity = 6;
 
     FrameBufferPool() = default;
     ~FrameBufferPool() { deinit(); }
@@ -72,6 +72,17 @@ public:
         if (!initialized_) return false;
         for (int i = 0; i < kCapacity; i++) {
             if (buffers_[i] == ptr) return true;
+        }
+        return false;
+    }
+
+    bool detach_and_replace(uint8_t* ptr) {
+        for (int i = 0; i < kCapacity; i++) {
+            if (buffers_[i] == ptr) {
+                buffers_[i] = new (std::nothrow) uint8_t[buffer_size_];
+                in_use_[i].store(false, std::memory_order_release);
+                return true;
+            }
         }
         return false;
     }
@@ -144,6 +155,7 @@ public:
 
     void returnFrame(ma_img_t& frame) noexcept override;
     void setChannelVencParams(int ch, const video_venc_params_t& params) noexcept;
+    void detachFrameBuffer(uint8_t* data) noexcept;
 
 private:
     channel m_channels[CHN_MAX];

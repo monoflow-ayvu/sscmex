@@ -51,6 +51,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 
+# Enable LTO for cross-file inlining (NIF templates, SSCMA-Micro vtable devirtualization)
+include(CheckIPOSupported)
+check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
+if(ipo_supported)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()
+
 # Include SG200X SDK toolchain if CMAKE_TOOLCHAIN_FILE is set
 if(DEFINED CMAKE_TOOLCHAIN_FILE)
     message(STATUS "Using CMAKE_TOOLCHAIN_FILE: ${CMAKE_TOOLCHAIN_FILE}")
