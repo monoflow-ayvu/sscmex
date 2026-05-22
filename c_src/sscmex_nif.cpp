@@ -125,7 +125,13 @@ static struct {
     ERL_NIF_TERM fmt_h265;
     ERL_NIF_TERM fmt_rgb888_planar;
     ERL_NIF_TERM fmt_webp;
+    ERL_NIF_TERM fmt_grayscale; // alias for fmt_gray ("grayscale" vs "gray")
     ERL_NIF_TERM fmt_unknown;
+    // Camera ctrl atoms
+    ERL_NIF_TERM ctrl_window;
+    ERL_NIF_TERM ctrl_channel;
+    ERL_NIF_TERM ctrl_format;
+    ERL_NIF_TERM ctrl_fps;
     // Model type atoms
     ERL_NIF_TERM mt_fomo;
     ERL_NIF_TERM mt_yolov5;
@@ -195,7 +201,13 @@ static void init_atoms(ErlNifEnv* env) {
     ATOMS.fmt_h265          = enif_make_atom(env, "h265");
     ATOMS.fmt_rgb888_planar = enif_make_atom(env, "rgb888_planar");
     ATOMS.fmt_webp          = enif_make_atom(env, "webp");
+    ATOMS.fmt_grayscale     = enif_make_atom(env, "grayscale");
     ATOMS.fmt_unknown       = enif_make_atom(env, "unknown");
+    // Camera ctrl types
+    ATOMS.ctrl_window       = enif_make_atom(env, "window");
+    ATOMS.ctrl_channel      = enif_make_atom(env, "channel");
+    ATOMS.ctrl_format       = enif_make_atom(env, "format");
+    ATOMS.ctrl_fps          = enif_make_atom(env, "fps");
     // Model types
     ATOMS.mt_fomo       = enif_make_atom(env, "fomo");
     ATOMS.mt_yolov5     = enif_make_atom(env, "yolov5");
@@ -367,19 +379,15 @@ static void frame_data_dtor(ErlNifEnv* env, void* obj) {
 }
 
 // Helper: atom to pixel format
-static ma_pixel_format_t atom_to_pixel_format(ErlNifEnv* env, ERL_NIF_TERM term) {
-    char atom[32];
-    if (!enif_get_atom(env, term, atom, sizeof(atom), ERL_NIF_LATIN1)) {
-        return MA_PIXEL_FORMAT_UNKNOWN;
-    }
-    if (strcmp(atom, "rgb888") == 0) return MA_PIXEL_FORMAT_RGB888;
-    if (strcmp(atom, "rgb565") == 0) return MA_PIXEL_FORMAT_RGB565;
-    if (strcmp(atom, "yuv422") == 0) return MA_PIXEL_FORMAT_YUV422;
-    if (strcmp(atom, "gray") == 0) return MA_PIXEL_FORMAT_GRAYSCALE;
-    if (strcmp(atom, "jpeg") == 0) return MA_PIXEL_FORMAT_JPEG;
-    if (strcmp(atom, "h264") == 0) return MA_PIXEL_FORMAT_H264;
-    if (strcmp(atom, "h265") == 0) return MA_PIXEL_FORMAT_H265;
-    if (strcmp(atom, "rgb888_planar") == 0) return MA_PIXEL_FORMAT_RGB888_PLANAR;
+static ma_pixel_format_t atom_to_pixel_format(ErlNifEnv*, ERL_NIF_TERM term) {
+    if (enif_is_identical(term, ATOMS.fmt_rgb888))        return MA_PIXEL_FORMAT_RGB888;
+    if (enif_is_identical(term, ATOMS.fmt_rgb565))        return MA_PIXEL_FORMAT_RGB565;
+    if (enif_is_identical(term, ATOMS.fmt_yuv422))        return MA_PIXEL_FORMAT_YUV422;
+    if (enif_is_identical(term, ATOMS.fmt_gray))          return MA_PIXEL_FORMAT_GRAYSCALE;
+    if (enif_is_identical(term, ATOMS.fmt_jpeg))          return MA_PIXEL_FORMAT_JPEG;
+    if (enif_is_identical(term, ATOMS.fmt_h264))          return MA_PIXEL_FORMAT_H264;
+    if (enif_is_identical(term, ATOMS.fmt_h265))          return MA_PIXEL_FORMAT_H265;
+    if (enif_is_identical(term, ATOMS.fmt_rgb888_planar)) return MA_PIXEL_FORMAT_RGB888_PLANAR;
     return MA_PIXEL_FORMAT_UNKNOWN;
 }
 
@@ -718,14 +726,14 @@ static int get_cv_interpolation(ErlNifEnv* env, ERL_NIF_TERM term) {
 }
 
 // Helper: parse format atom to integer (ma_pixel_format_t value or SSCMEX_FORMAT_WEBP)
-static int parse_format_atom_cstr(const char* atom) {
-    if (strcmp(atom, "rgb888") == 0)         return MA_PIXEL_FORMAT_RGB888;
-    if (strcmp(atom, "rgb565") == 0)         return MA_PIXEL_FORMAT_RGB565;
-    if (strcmp(atom, "yuv422") == 0)         return MA_PIXEL_FORMAT_YUV422;
-    if (strcmp(atom, "gray") == 0)           return MA_PIXEL_FORMAT_GRAYSCALE;
-    if (strcmp(atom, "grayscale") == 0)      return MA_PIXEL_FORMAT_GRAYSCALE;
-    if (strcmp(atom, "jpeg") == 0)           return MA_PIXEL_FORMAT_JPEG;
-    if (strcmp(atom, "webp") == 0)           return SSCMEX_FORMAT_WEBP;
+static int parse_format_atom(ERL_NIF_TERM term) {
+    if (enif_is_identical(term, ATOMS.fmt_rgb888))    return MA_PIXEL_FORMAT_RGB888;
+    if (enif_is_identical(term, ATOMS.fmt_rgb565))    return MA_PIXEL_FORMAT_RGB565;
+    if (enif_is_identical(term, ATOMS.fmt_yuv422))    return MA_PIXEL_FORMAT_YUV422;
+    if (enif_is_identical(term, ATOMS.fmt_gray))      return MA_PIXEL_FORMAT_GRAYSCALE;
+    if (enif_is_identical(term, ATOMS.fmt_grayscale)) return MA_PIXEL_FORMAT_GRAYSCALE;
+    if (enif_is_identical(term, ATOMS.fmt_jpeg))      return MA_PIXEL_FORMAT_JPEG;
+    if (enif_is_identical(term, ATOMS.fmt_webp))      return SSCMEX_FORMAT_WEBP;
     return -1;
 }
 
@@ -782,11 +790,7 @@ static ERL_NIF_TERM image_convert(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
     }
 
     // Parse target format
-    char fmt_atom[32];
-    if (!enif_get_atom(env, argv[1], fmt_atom, sizeof(fmt_atom), ERL_NIF_LATIN1)) {
-        return make_error(env, "invalid_target_format");
-    }
-    int dst_fmt = parse_format_atom_cstr(fmt_atom);
+    int dst_fmt = parse_format_atom(argv[1]);
     if (dst_fmt < 0) {
         return make_error(env, "unsupported_target_format");
     }
@@ -1943,21 +1947,31 @@ static ERL_NIF_TERM do_camera_retrieve(ErlNifEnv* env, const ERL_NIF_TERM argv[]
         return make_error(env, err == MA_AGAIN ? "queue_empty" : "retrieve_frame_failed");
     }
 
-    // Copy frame data into an ERL binary and return the buffer to the pool
-    // immediately. This avoids the previous detach-and-replace pattern which
-    // allocated a fresh 6MB buffer (new uint8_t[]) on every retrieval.
-    ErlNifBinary out_bin;
-    if (!enif_alloc_binary(frame.size, &out_bin)) {
-        sg200x->returnFrame(frame);
+    // Zero-copy: transfer buffer ownership from the pool to a FrameDataRes
+    // resource, then wrap it with enif_make_resource_binary. This avoids a
+    // full-frame memcpy (e.g. 6 MB at 1080p RGB888) on every retrieval.
+    //
+    // detachFrameBuffer: if the buffer came from the pool, replaces the pool
+    // slot with a fresh allocation and relinquishes ownership of `frame.data`.
+    // If the buffer was a heap-fallback (pool was full), this is a no-op —
+    // FrameDataRes still owns it via delete[] in its destructor either way.
+    sg200x->detachFrameBuffer(frame.data);
+
+    auto* fres = NifRes<FrameDataRes>::allocate(env);
+    if (!fres) {
+        delete[] frame.data;
         return make_error(env, "allocation_failed");
     }
-    memcpy(out_bin.data, frame.data, frame.size);
+    fres->val = new (std::nothrow) FrameDataRes();
+    if (!fres->val) {
+        delete[] frame.data;
+        enif_release_resource(fres);
+        return make_error(env, "allocation_failed");
+    }
+    fres->val->data = frame.data;
 
-    // Return buffer to pool (no-op for heap-fallback frames; for pool frames
-    // the slot becomes available immediately for the next camera callback).
-    sg200x->returnFrame(frame);
-
-    ERL_NIF_TERM data_bin = enif_make_binary(env, &out_bin);
+    ERL_NIF_TERM data_bin = enif_make_resource_binary(env, fres, frame.data, frame.size);
+    enif_release_resource(fres);
 
     ERL_NIF_TERM map = enif_make_new_map(env);
     enif_make_map_put(env, map, ATOMS.width, enif_make_int(env, frame.width), &map);
@@ -1993,21 +2007,13 @@ static ERL_NIF_TERM camera_retrieve_latest_frame(ErlNifEnv* env, int argc, const
 }
 
 // NIF: Set camera control
-static bool parse_camera_ctrl_type(ErlNifEnv* env, ERL_NIF_TERM term, Camera::CtrlType* ctrl) {
+static bool parse_camera_ctrl_type(ERL_NIF_TERM term, Camera::CtrlType* ctrl) {
     if (!ctrl) return false;
-
-    char ctrl_atom[32];
-    if (!enif_get_atom(env, term, ctrl_atom, sizeof(ctrl_atom), ERL_NIF_LATIN1)) {
-        return false;
-    }
-
-    if (strcmp(ctrl_atom, "window") == 0) *ctrl = Camera::CtrlType::kWindow;
-    else if (strcmp(ctrl_atom, "channel") == 0) *ctrl = Camera::CtrlType::kChannel;
-    else if (strcmp(ctrl_atom, "format") == 0) *ctrl = Camera::CtrlType::kFormat;
-    else if (strcmp(ctrl_atom, "fps") == 0) *ctrl = Camera::CtrlType::kFps;
-    else return false;
-
-    return true;
+    if (enif_is_identical(term, ATOMS.ctrl_window))       { *ctrl = Camera::CtrlType::kWindow;  return true; }
+    if (enif_is_identical(term, ATOMS.ctrl_channel))      { *ctrl = Camera::CtrlType::kChannel; return true; }
+    if (enif_is_identical(term, ATOMS.ctrl_format))       { *ctrl = Camera::CtrlType::kFormat;  return true; }
+    if (enif_is_identical(term, ATOMS.ctrl_fps))          { *ctrl = Camera::CtrlType::kFps;     return true; }
+    return false;
 }
 
 static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
@@ -2284,7 +2290,7 @@ static ERL_NIF_TERM camera_set_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
     }
 
     Camera::CtrlType ctrl;
-    if (!parse_camera_ctrl_type(env, argv[1], &ctrl)) {
+    if (!parse_camera_ctrl_type(argv[1], &ctrl)) {
         return make_error(env, "unsupported_ctrl");
     }
 
@@ -2470,7 +2476,7 @@ static ERL_NIF_TERM camera_get_ctrl(ErlNifEnv* env, int argc, const ERL_NIF_TERM
     }
 
     Camera::CtrlType ctrl;
-    if (!parse_camera_ctrl_type(env, argv[1], &ctrl)) {
+    if (!parse_camera_ctrl_type(argv[1], &ctrl)) {
         return make_error(env, "unsupported_ctrl");
     }
 

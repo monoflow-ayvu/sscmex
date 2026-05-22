@@ -80,6 +80,16 @@ add_library(sscma_micro STATIC ${SSCMA_MICRO_SOURCES})
 # Set Position Independent Code for the static library (required for linking into shared library)
 set_target_properties(sscma_micro PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+# -ffast-math: allow reordering/fusing float ops (FMA, reciprocal approx) in
+#   NMS IOU, cv::convert, sigmoid — safe because detection scores don't need
+#   IEEE precision.
+# -ftree-vectorize: already implied by -O3 in GCC, but explicit here so it
+#   applies even when CMAKE_BUILD_TYPE != Release. Together with the
+#   -march=rv64gcv_zfh from the toolchain, GCC emits RISC-V V (vector)
+#   instructions for tight byte/float loops (e.g. the S8 subtract-128 in
+#   Detector::preprocess, NMS sort, pixel conversion).
+target_compile_options(sscma_micro PRIVATE -ffast-math -ftree-vectorize)
+
 # Set include directories for the library
 target_include_directories(sscma_micro PUBLIC
     "${SSCMA_MICRO_DIR}"
