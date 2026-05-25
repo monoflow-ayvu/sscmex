@@ -419,6 +419,7 @@ static ERL_NIF_TERM model_type_to_atom(ErlNifEnv*, ma_model_type_t type) {
         case MA_MODEL_TYPE_IMCLS:       return ATOMS.mt_classifier;
         case MA_MODEL_TYPE_YOLOV8_POSE: return ATOMS.mt_yolov8_pose;
         case MA_MODEL_TYPE_YOLO11_POSE: return ATOMS.mt_yolo11_pose;
+        case MA_MODEL_TYPE_YOLO11_POSE_SH: return ATOMS.mt_yolo11_pose;
         case MA_MODEL_TYPE_YOLO11_SEG:  return ATOMS.mt_yolo11_seg;
         case MA_MODEL_TYPE_YOLO26:      return ATOMS.mt_yolo26;
         default:                        return ATOMS.mt_unknown;

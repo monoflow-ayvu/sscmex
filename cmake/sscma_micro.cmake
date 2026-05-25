@@ -6,7 +6,7 @@
 set(SSCMA_MICRO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/SSCMA-Micro")
 
 if(NOT EXISTS "${SSCMA_MICRO_DIR}/sscma")
-    message(FATAL_ERROR "SSCMA-Micro not found at: ${SSCMA_MICRO_DIR}. Run: git submodule update --init")
+    message(FATAL_ERROR "SSCMA-Micro not found at: ${SSCMA_MICRO_DIR}")
 endif()
 
 # Fail fast when the SG2002 SDK isn't available. SSCMA-Micro's CVI engine

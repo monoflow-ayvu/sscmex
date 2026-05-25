@@ -47,7 +47,6 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ steps.release_tag.outputs.tag }}
-          submodules: recursive
 
       - name: Set up BEAM toolchain
         uses: erlef/setup-beam@v1
