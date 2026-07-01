@@ -45,10 +45,10 @@ namespace sscmex {
 
 class YoloV7 : public ma::model::Detector {
 public:
-    // Slot 15u is the next free value after MA_MODEL_TYPE_YOLO26 (=14u). We
-    // pass it to the Detector base ctor so getType() returns it; user code
-    // (sscmex_nif.cpp / SSCMEx.Model) maps it back to :yolov7.
-    static constexpr uint16_t kModelType = 15u;
+    // Reported via getType(); must not alias any ma_model_type_t or
+    // model_type_to_atom() will mislabel a real vendor type. 15u collided with
+    // MA_MODEL_TYPE_YOLO11_POSE_SH; 16u is past the vendor enum's end.
+    static constexpr uint16_t kModelType = 16u;
 
     explicit YoloV7(ma::engine::Engine* engine);
     ~YoloV7() override;

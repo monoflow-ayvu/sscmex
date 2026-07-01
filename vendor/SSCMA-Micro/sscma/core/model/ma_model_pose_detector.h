@@ -10,7 +10,8 @@ namespace ma::model {
 class PoseDetector : public Model {
 protected:
     ma_tensor_t input_;
-    ma_img_t img_;
+    ma_img_t img_{};  // zero-init: ctor leaves rotate unset and cv::convert()
+                      // branches on img_.rotate.
     const ma_img_t* input_img_;
 
     float threshold_nms_;

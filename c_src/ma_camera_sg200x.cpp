@@ -69,7 +69,11 @@ int CameraSG200X::vencCallback(void* pData, void* pArgs) {
     APP_VENC_CHN_CFG_S* pstVencChnCfg = (APP_VENC_CHN_CFG_S*)pstDataParam->pParam;
     VENC_CHN VencChn                  = pstVencChnCfg->VencChn;
 
-    if (!m_streaming) {
+    // Drop frames for a channel we don't own (stale/mis-routed registration).
+    if (VencChn < 0 || VencChn >= CHN_MAX) {
+        return CVI_SUCCESS;
+    }
+    if (!m_streaming || !m_channels[VencChn].enabled) {
         return CVI_SUCCESS;
     }
 
@@ -148,6 +152,10 @@ int CameraSG200X::vpssCallback(void* pData, void* pArgs) {
     }
 
     int ch_idx = pstVencChnCfg->VencChn;
+    // Drop frames for a channel we don't own (stale/mis-routed registration).
+    if (ch_idx < 0 || ch_idx >= CHN_MAX || !m_channels[ch_idx].enabled) {
+        return CVI_SUCCESS;
+    }
     auto& ch = m_channels[ch_idx];
 
     size_t total_size = 0;
@@ -411,6 +419,14 @@ void CameraSG200X::stopStream() noexcept {
     }
     MA_LOGD(TAG, "CameraSG200X::stopStream: %zu", m_id);
     m_streaming = false;
+
+    // Clear our `this` from the process-global venc handler tables before
+    // teardown, so a later pipeline's DataConsume thread can't call back
+    // through this freed pointer (g_Consumes/g_pUserData in venc.c).
+    for (int i = 0; i < CHN_MAX; i++) {
+        registerVideoFrameHandler(static_cast<video_ch_index_t>(i), 0, nullptr, nullptr);
+    }
+
     CAMERA_DEINIT();
     for (int i = 0; i < CHN_MAX; i++) {
         clearChannelQueue(m_channels[i]);
