@@ -1,7 +1,7 @@
 defmodule Sscmex.MixProject do
   use Mix.Project
 
-  @version "0.6.0"
+  @version "0.7.0"
   @github_url "https://github.com/monoflow-ayvu/sscmex"
   @mix_target_triplets %{
     "nerves_system_sg2002" => {"riscv64", "unknown", "linux-musl"}

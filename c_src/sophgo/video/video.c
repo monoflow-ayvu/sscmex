@@ -97,6 +97,7 @@ static int setVencChn(video_ch_index_t ch, const video_ch_param_t* param) {
     pvchn->u32Width           = param->width;
     pvchn->u32Height          = param->height;
     pvchn->u32DstFrameRate    = param->fps;
+    pvchn->u32SrcFrameRate    = param->fps;
 
     if (param->venc_params.has_venc_params && (enType == PT_H264 || enType == PT_H265)) {
         const video_venc_params_t* vp = &param->venc_params;
