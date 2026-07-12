@@ -73,7 +73,7 @@ jobs:
             ca-certificates
 
       - name: Restore Mix cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             deps
@@ -89,7 +89,7 @@ jobs:
           mix local.rebar --force
 
       - name: Restore SG2002 SDK cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .devenv/state/sg200x-sdk
           key: ${{ runner.os }}-sg200x-sdk-reCameraOS-0.2.0
